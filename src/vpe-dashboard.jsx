@@ -3140,6 +3140,11 @@ export default function VPEDashboard() {
         <div>
           <div className="text-xs tracking-widest font-bold" style={{ color: C.gold }}>VP EDUCATION</div>
           <div className="text-base text-white" style={{ fontFamily: SERIF }}>Dashboard</div>
+          <div className="flex items-center gap-1 text-xs mt-0.5"
+            style={{ color: syncStatus === "ok" ? "#7EE0A0" : syncStatus === "error" ? "#F4A19A" : "rgba(255,255,255,0.55)" }}>
+            <span>{syncStatus === "loading" ? "⟳" : syncStatus === "ok" ? "✓" : syncStatus === "error" ? "⚠" : "○"}</span>
+            <span>{syncStatus === "loading" ? "Syncing…" : syncStatus === "ok" ? "Saved to cloud" : syncStatus === "error" ? "Cloud sync failed" : "Not connected"}</span>
+          </div>
         </div>
         <div className="flex gap-2">
           <Btn kind="maroon" onClick={exportJSON}>JSON</Btn>
