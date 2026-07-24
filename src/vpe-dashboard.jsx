@@ -363,12 +363,8 @@ function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
           </Field>
 
           <div className="sm:col-span-2 flex flex-wrap items-end gap-4 p-3 rounded-md"
-            style={{ backgroundColor: m.isNew ? C.amberBg : C.paper, border: `1px dashed ${C.grayLine}` }}>
+            style={{ backgroundColor: C.paper, border: `1px dashed ${C.grayLine}` }}>
             <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
-              <input type="checkbox" checked={m.isNew} onChange={(e) => set("isNew", e.target.checked)} />
-              New member
-            </label>
-            <label className="flex items-center gap-2 text-sm font-semibold ml-4" style={{ color: C.blueDeep }}>
               <input type="checkbox" checked={!!m.isCommittee} onChange={(e) => set("isCommittee", e.target.checked)} />
               Committee member
             </label>
@@ -464,14 +460,12 @@ function OnboardingBar({ startISO, compact, stages, stagesDone, onToggleStage })
   const day = onboardingDay(startISO);
 
   const isChecked = (i) => stagesDone && stagesDone[i];
-  const isDone = (s, i) => isChecked(i) || (day !== null && day > s.to);
+  const isDone = (s, i) => isChecked(i);
   const isActive = (s, i) => !isChecked(i) && day !== null && day >= s.from && day <= s.to;
 
   const checkedCount = stagesDone ? stagesDone.filter(Boolean).length : 0;
-  const dayDone = day !== null ? plan.filter((s) => day > s.to).length : 0;
-  const effectiveDone = Math.max(checkedCount, dayDone);
-  const pct = Math.min(100, Math.round((effectiveDone / plan.length) * 100));
-  const allDone = effectiveDone >= plan.length;
+  const pct = Math.min(100, Math.round((checkedCount / plan.length) * 100));
+  const allDone = checkedCount >= plan.length;
 
   const currentStage = day !== null ? stageForDay(day, plan) : null;
 
@@ -503,7 +497,7 @@ function OnboardingBar({ startISO, compact, stages, stagesDone, onToggleStage })
                   fontWeight: active ? 700 : 500,
                 }}>
                 {onToggleStage ? (
-                  <input type="checkbox" checked={checked || (day !== null && day > s.to)} className="shrink-0"
+                  <input type="checkbox" checked={checked} className="shrink-0"
                     onChange={() => onToggleStage(i)}
                     title="Mark stage complete" />
                 ) : (
@@ -715,14 +709,27 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
 
       <Card className="p-4" accent={st.fg}>
         <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>ATTENDANCE</div>
-        <div className="grid grid-cols-2 gap-4 mb-3">
-          <div>
-            <div className="text-xs mb-0.5" style={{ color: MUTED }}>Last attended</div>
+        <div className="mb-3">
+          <div className="text-xs mb-1" style={{ color: MUTED }}>Last attended</div>
+          {setData ? (
+            <input
+              type="date"
+              className={inputCls}
+              style={inputStyle}
+              value={m.lastAttended || ""}
+              onChange={(e) => setData((d) => ({
+                ...d,
+                members: d.members.map((mem) =>
+                  mem.id === m.id ? { ...mem, lastAttended: e.target.value } : mem
+                ),
+              }))}
+            />
+          ) : (
             <div className="font-bold" style={{ color: C.ink }}>{fmtDate(m.lastAttended)}</div>
-            {daysAgo !== null && (
-              <div className="text-xs mt-0.5" style={{ color: st.fg }}>{daysAgo} days ago</div>
-            )}
-          </div>
+          )}
+          {daysAgo !== null && (
+            <div className="text-xs mt-1" style={{ color: st.fg }}>{daysAgo} days ago</div>
+          )}
         </div>
         <Badge fg={st.fg} bg={st.bg}>{st.label}</Badge>
       </Card>
@@ -993,10 +1000,6 @@ function MemberSelfAdd({ name, onSave }) {
         </select>
       </Field>
       <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
-        <input type="checkbox" checked={m.isNew} onChange={(e) => set("isNew", e.target.checked)} />
-        I'm a new member
-      </label>
-      <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
         <input type="checkbox"
           checked={!!m.onboardingStart}
           onChange={(e) => set("onboardingStart", e.target.checked ? new Date().toISOString().slice(0, 10) : "")} />
@@ -1095,9 +1098,9 @@ function MemberPortalView({ data, setData, onSwitchToAdmin }) {
           <>
             {/* Upcoming events panel */}
             {upcomingEvents.length > 0 && (
-              <div className="mb-4 rounded-xl overflow-hidden" style={{ border: `1px solid ${C.gold}` }}>
-                <div className="px-4 py-2" style={{ backgroundColor: C.gold }}>
-                  <span className="text-xs font-bold tracking-wide" style={{ color: "white" }}>UPCOMING IN THE CLUB</span>
+              <div className="mb-4 rounded-xl overflow-hidden" style={{ border: `1px solid ${C.grayLine}` }}>
+                <div className="px-4 py-2" style={{ backgroundColor: C.blueDeep }}>
+                  <span className="text-xs font-bold tracking-wide" style={{ color: C.gold }}>UPCOMING IN THE CLUB</span>
                 </div>
                 <div style={{ backgroundColor: "#FFFDF5" }}>
                   {upcomingEvents.map((ev, i) => (
@@ -1345,7 +1348,6 @@ function BulkEditModal({ data, onSave, onClose }) {
               <th className={th} style={{ color: C.gold, minWidth: "220px" }}>Pathways path(s)</th>
               <th className={th} style={{ color: C.gold, minWidth: "70px" }}>Level</th>
               <th className={th} style={{ color: C.gold, minWidth: "130px" }}>Last attended</th>
-              <th className={th} style={{ color: C.gold, minWidth: "55px", textAlign: "center" }}>New?</th>
               <th className={th} style={{ color: C.gold, minWidth: "130px" }}>100-day plan start</th>
               <th className={th} style={{ color: C.gold, minWidth: "200px" }}>Toastmasters goal</th>
               <th className={th} style={{ color: C.gold, minWidth: "170px" }}>Notes</th>
@@ -1389,10 +1391,6 @@ function BulkEditModal({ data, onSave, onClose }) {
                 <td className={td}>
                   <input type="date" className={cell} style={inputStyle} value={r.lastAttended || ""}
                     onChange={(e) => update(r.id, "lastAttended", e.target.value)} />
-                </td>
-                <td className={td} style={{ textAlign: "center" }}>
-                  <input type="checkbox" checked={!!r.isNew}
-                    onChange={(e) => update(r.id, "isNew", e.target.checked)} />
                 </td>
                 <td className={td}>
                   <input type="date" className={cell} style={inputStyle} value={r.onboardingStart || ""}
@@ -1674,7 +1672,6 @@ function MembersView({ data, setData, initialFilter }) {
         if (filter === "dormant" && st !== "dormant") return false;
         if (filter === "nudge" && st !== "nudge") return false;
         if (filter === "active" && st === "dormant") return false;
-        if (filter === "new" && !m.isNew) return false;
         if (filter === "nopath" && memberPaths(m).length > 0) return false;
         if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false;
         return true;
@@ -1702,7 +1699,7 @@ function MembersView({ data, setData, initialFilter }) {
   };
 
   const filters = [
-    ["all", "All"], ["active", "Active"], ["nudge", "Needs nudge"], ["dormant", "Dormant"], ["new", "New members"], ["nopath", "No path selected"],
+    ["all", "All"], ["active", "Active"], ["nudge", "Needs nudge"], ["dormant", "Dormant"], ["nopath", "No path selected"],
   ];
 
   return (
@@ -2962,7 +2959,6 @@ export default function VPEDashboard() {
       "Last attended": m.lastAttended || "",
       "Days since attended": daysSince(m.lastAttended) ?? "",
       Status: memberStatus(m).key,
-      "New member": m.isNew ? "Yes" : "No",
       "Onboarding start": m.onboardingStart || "",
       "Onboarding day": m.onboardingStart ? (onboardingDay(m.onboardingStart) ?? "") : "",
       Notes: m.notes,
