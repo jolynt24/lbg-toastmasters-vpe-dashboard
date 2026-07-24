@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 
 /* ============================================================
@@ -40,11 +40,22 @@ const COMMON_ROLES = [
   "Speaker", "Table Topics Speaker",
 ];
 
+const ROTA_ROLES = [
+  { key: "toastmaster", label: "Toastmaster" },
+  { key: "ttMaster", label: "TT Master" },
+  { key: "ge", label: "Gen. Evaluator" },
+  { key: "speaker1", label: "Speaker 1" },
+  { key: "speaker2", label: "Speaker 2" },
+  { key: "timekeeper", label: "Timekeeper" },
+  { key: "ahCounter", label: "Ah Counter" },
+  { key: "grammarian", label: "Grammarian" },
+];
+
 const ONBOARDING_STAGES = [
   { from: 1, to: 14, label: "Attend & observe" },
-  { from: 15, to: 30, label: "Timekeeper role" },
-  { from: 31, to: 50, label: "Ah Counter / GE support" },
-  { from: 51, to: 70, label: "Table Topics participant" },
+  { from: 15, to: 30, label: "Table Topics speaker" },
+  { from: 31, to: 50, label: "Timekeeper" },
+  { from: 51, to: 70, label: "Listener" },
   { from: 71, to: 85, label: "Table Topics Master" },
   { from: 86, to: 100, label: "Deliver Icebreaker speech" },
 ];
@@ -101,7 +112,14 @@ const emptyData = () => ({
   recognitions: [],
   weeks: [],
   educationGoals: [],
+  onboardingTemplate: null, // null = use ONBOARDING_STAGES default
+  buddyGroups: [],          // [{ id, name, memberIds: [] }]
+  meetingRota: [],          // [{ id, date, theme, roles: { toastmaster, ttMaster, ge, speaker1, speaker2, timekeeper, ahCounter, grammarian } }]
 });
+
+// ---------- Auth ----------
+const ADMIN_PASSWORD = "unicorn"; // change this to update the shared committee password
+const SS_UNLOCKED_KEY = "vpe-admin-unlocked";
 
 // ---------- Helpers ----------
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -218,7 +236,7 @@ const inputCls =
 const inputStyle = { border: `1px solid ${C.grayLine}`, color: C.ink };
 
 // ---------- Welcome screen ----------
-function Welcome({ onStartFresh, onLoadFile }) {
+function Welcome({ onStartFresh, onLoadFile, onMemberMode }) {
   const fileRef = useRef(null);
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: C.blue }}>
@@ -231,12 +249,16 @@ function Welcome({ onStartFresh, onLoadFile }) {
           Members Dashboard
         </h1>
         <p className="text-sm mb-6" style={{ color: "#5B6B73" }}>
-          Your data stays on this device. Load your saved JSON file to pick up
-          where you left off, or start a fresh club record.
+          Your data is saved automatically in this browser. Load a JSON backup to restore a previous session, or start fresh.
         </p>
         <div className="flex flex-col gap-3">
           <Btn onClick={() => fileRef.current?.click()}>Load JSON file</Btn>
           <Btn kind="ghost" onClick={onStartFresh}>Start fresh</Btn>
+          <div className="pt-3" style={{ borderTop: `1px solid ${C.grayLine}` }}>
+            <Btn kind="ghost" onClick={onMemberMode} className="w-full">
+              I'm a member — View my progress →
+            </Btn>
+          </div>
         </div>
         <input
           ref={fileRef}
@@ -257,14 +279,60 @@ function Welcome({ onStartFresh, onLoadFile }) {
   );
 }
 
+// ---------- Admin login ----------
+function AdminLogin({ onUnlock, onMemberMode }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState(false);
+
+  const attempt = () => {
+    if (pw === ADMIN_PASSWORD) {
+      sessionStorage.setItem(SS_UNLOCKED_KEY, "1");
+      onUnlock();
+    } else {
+      setError(true);
+      setPw("");
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: C.blue }}>
+      <div className="max-w-sm w-full bg-white rounded-xl shadow-lg p-8"
+        style={{ borderTop: `6px solid ${C.maroon}` }}>
+        <div className="text-xs tracking-widest font-bold mb-2" style={{ color: C.maroon }}>VP EDUCATION</div>
+        <h1 className="text-2xl mb-2" style={{ fontFamily: SERIF, color: C.blue }}>Admin login</h1>
+        <p className="text-sm mb-5" style={{ color: "#5B6B73" }}>
+          Enter the committee password to access the dashboard.
+        </p>
+        <div className="space-y-3">
+          <Field label="Password">
+            <input type="password" className={inputCls} style={inputStyle} value={pw}
+              onChange={(e) => { setPw(e.target.value); setError(false); }}
+              placeholder="Password"
+              onKeyDown={(e) => { if (e.key === "Enter") attempt(); }}
+              autoFocus />
+          </Field>
+          {error && <p className="text-xs" style={{ color: C.red }}>Incorrect password. Try again.</p>}
+          <Btn className="w-full" disabled={!pw} onClick={attempt}>Login</Btn>
+          <div className="pt-3" style={{ borderTop: `1px solid ${C.grayLine}` }}>
+            <Btn kind="ghost" className="w-full" onClick={onMemberMode}>
+              I'm a member — View my progress →
+            </Btn>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Member form modal ----------
-function MemberModal({ initial, onSave, onClose }) {
+function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
   const [m, setM] = useState(() => {
     if (!initial) {
       return {
         id: uid(), name: "", paths: [], level: 1, currentProject: "",
         lastAttended: "", totalMeetings: 0, roles: [], isNew: false,
         onboardingStart: "", notes: "", roleLog: [], devFeeling: "", devNextStep: "", levelDates: {},
+        customPlan: onboardingTemplate || null,
       };
     }
     return { ...initial, paths: memberPaths(initial), roleLog: initial.roleLog || [], devFeeling: initial.devFeeling || "", devNextStep: initial.devNextStep || "", levelDates: initial.levelDates || {} };
@@ -386,10 +454,20 @@ function MemberModal({ initial, onSave, onClose }) {
             style={{ backgroundColor: m.isNew ? C.amberBg : C.paper, border: `1px dashed ${C.grayLine}` }}>
             <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
               <input type="checkbox" checked={m.isNew} onChange={(e) => set("isNew", e.target.checked)} />
-              New member (100-day plan)
+              New member
             </label>
-            {m.isNew && (
-              <Field label="Onboarding start date">
+          </div>
+
+          <div className="sm:col-span-2 flex flex-wrap items-end gap-4 p-3 rounded-md"
+            style={{ backgroundColor: m.onboardingStart ? C.paper : "transparent", border: `1px dashed ${C.grayLine}` }}>
+            <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
+              <input type="checkbox"
+                checked={!!m.onboardingStart}
+                onChange={(e) => set("onboardingStart", e.target.checked ? new Date().toISOString().slice(0, 10) : "")} />
+              100-day plan (opt-in for any member)
+            </label>
+            {m.onboardingStart && (
+              <Field label="Plan start date">
                 <input type="date" className={inputCls} style={inputStyle} value={m.onboardingStart}
                   onChange={(e) => set("onboardingStart", e.target.value)} />
               </Field>
@@ -596,10 +674,891 @@ function PlanModal({ member, onSave, onClose }) {
   );
 }
 
+// ---------- Member profile card (read-only self-view) ----------
+function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers, setData, onboardingTemplate, rota, buddyGroups }) {
+  const st = memberStatus(m);
+  const df = DEV_FEELING_MAP[m.devFeeling] || null;
+  const daysAgo = daysSince(m.lastAttended);
+  const myRecognitions = (recognitions || []).filter((r) => r.member === m.name);
+  const paths = memberPaths(m);
+  const currentYear = new Date().getFullYear();
+  const goals = (educationGoals || []).filter((g) => g.year === currentYear);
+  const myLevel = m.level;
+
+  const [newGoalLabel, setNewGoalLabel] = useState("");
+  const [editingPlan, setEditingPlan] = useState(false);
+
+  const effectivePlan = (m.customPlan && m.customPlan.length)
+    ? m.customPlan
+    : (onboardingTemplate && onboardingTemplate.length ? onboardingTemplate : ONBOARDING_STAGES);
+
+  const toggleStage = setData
+    ? (i) => {
+        setData((d) => ({
+          ...d,
+          members: d.members.map((mem) => {
+            if (mem.id !== m.id) return mem;
+            const current = mem.stagesDone || Array(effectivePlan.length).fill(false);
+            return { ...mem, stagesDone: current.map((v, idx) => (idx === i ? !v : v)) };
+          }),
+        }));
+      }
+    : undefined;
+
+  const addGoal = () => {
+    const label = newGoalLabel.trim();
+    if (!label || !setData) return;
+    const last = effectivePlan[effectivePlan.length - 1];
+    const from = last ? last.to + 1 : 101;
+    setData((d) => ({
+      ...d,
+      members: d.members.map((mem) => {
+        if (mem.id !== m.id) return mem;
+        const base = mem.customPlan && mem.customPlan.length ? mem.customPlan : effectivePlan;
+        const newPlan = [...base, { from, to: from + 13, label }];
+        const current = mem.stagesDone || Array(base.length).fill(false);
+        return { ...mem, customPlan: newPlan, stagesDone: [...current, false] };
+      }),
+    }));
+    setNewGoalLabel("");
+  };
+
+  return (
+    <div className="space-y-4 max-w-2xl mx-auto">
+      <div className="rounded-xl p-6" style={{ backgroundColor: C.blue, borderBottom: `5px solid ${C.maroon}` }}>
+        <div className="text-xs tracking-widest font-bold mb-1" style={{ color: C.gold }}>MEMBER PROFILE</div>
+        <h1 className="text-3xl text-white mb-1" style={{ fontFamily: SERIF }}>{m.name}</h1>
+        {paths.length > 0 && (
+          <div className="text-sm" style={{ color: "rgba(255,255,255,0.75)" }}>
+            {paths.join(" · ")} — Level {m.level}
+          </div>
+        )}
+      </div>
+
+      <Card className="p-4" accent={st.fg}>
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>ATTENDANCE</div>
+        <div className="grid grid-cols-2 gap-4 mb-3">
+          <div>
+            <div className="text-xs mb-0.5" style={{ color: MUTED }}>Last attended</div>
+            <div className="font-bold" style={{ color: C.ink }}>{fmtDate(m.lastAttended)}</div>
+            {daysAgo !== null && (
+              <div className="text-xs mt-0.5" style={{ color: st.fg }}>{daysAgo} days ago</div>
+            )}
+          </div>
+          <div>
+            <div className="text-xs mb-0.5" style={{ color: MUTED }}>Total meetings</div>
+            <div className="text-2xl font-bold" style={{ fontFamily: SERIF, color: C.blue }}>{m.totalMeetings || 0}</div>
+          </div>
+        </div>
+        <Badge fg={st.fg} bg={st.bg}>{st.label}</Badge>
+      </Card>
+
+      <Card className="p-4" accent={C.maroon}>
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>PATHWAYS PROGRESS</div>
+        {paths.length === 0 ? (
+          <p className="text-sm" style={{ color: C.amber }}>No Pathways path selected yet — speak to your VPE.</p>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <div className="text-xs mb-0.5" style={{ color: MUTED }}>Path(s)</div>
+              <div className="font-semibold" style={{ color: C.blueDeep }}>{paths.join(", ")}</div>
+            </div>
+            <div>
+              <div className="text-xs mb-0.5" style={{ color: MUTED }}>Currently working on</div>
+              <div className="font-bold" style={{ color: C.blueDeep }}>Level {m.level}</div>
+              {m.currentProject && <div className="text-sm mt-0.5" style={{ color: C.ink }}>{m.currentProject}</div>}
+            </div>
+            {Object.keys(m.levelDates || {}).length > 0 && (
+              <div>
+                <div className="text-xs font-bold mb-1.5" style={{ color: MUTED }}>Levels completed</div>
+                <div className="flex flex-wrap gap-2">
+                  {[1, 2, 3, 4, 5].map((l) => {
+                    const date = (m.levelDates || {})[String(l)];
+                    if (!date) return null;
+                    return (
+                      <div key={l} className="text-xs px-2 py-1 rounded"
+                        style={{ backgroundColor: C.greenBg, color: C.green, border: `1px solid ${C.green}` }}>
+                        <span className="font-bold">Level {l}</span> — {fmtDate(date)}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {!m.onboardingStart && setData && (
+        <Card className="p-4" accent={C.gold}>
+          <div className="text-xs font-bold tracking-wide mb-2" style={{ color: C.blueDeep }}>100-DAY PLAN</div>
+          <p className="text-sm mb-4" style={{ color: MUTED }}>
+            Track your progress with a structured 100-day plan. You can tick off stages, add personal goals, and customise your checklist.
+          </p>
+          <Btn kind="maroon" onClick={() => {
+            const today = new Date().toISOString().slice(0, 10);
+            setData((d) => ({
+              ...d,
+              members: d.members.map((mem) =>
+                mem.id === m.id ? { ...mem, onboardingStart: today } : mem
+              ),
+            }));
+          }}>
+            Enroll in 100-day plan
+          </Btn>
+        </Card>
+      )}
+
+      {m.onboardingStart && (
+        <Card className="p-4" accent={C.gold}>
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs font-bold tracking-wide" style={{ color: C.blueDeep }}>100-DAY PLAN</div>
+            {setData && (
+              <Btn kind="ghost" onClick={() => setEditingPlan(true)}>Edit checklist</Btn>
+            )}
+          </div>
+          {setData && (
+            <div className="flex items-center gap-3 mb-3 text-xs" style={{ color: MUTED }}>
+              <span>Started:</span>
+              <input
+                type="date"
+                className={inputCls}
+                style={{ ...inputStyle, padding: "1px 6px", fontSize: "0.75rem" }}
+                value={m.onboardingStart}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setData((d) => ({
+                    ...d,
+                    members: d.members.map((mem) =>
+                      mem.id === m.id ? { ...mem, onboardingStart: val } : mem
+                    ),
+                  }));
+                }}
+              />
+              <button
+                className="underline"
+                style={{ color: MUTED }}
+                onClick={() => {
+                  if (window.confirm("Opt out of the 100-day plan? Your checklist progress will be kept if you re-enrol.")) {
+                    setData((d) => ({
+                      ...d,
+                      members: d.members.map((mem) =>
+                        mem.id === m.id ? { ...mem, onboardingStart: "" } : mem
+                      ),
+                    }));
+                  }
+                }}>
+                Opt out
+              </button>
+            </div>
+          )}
+          <OnboardingBar
+            startISO={m.onboardingStart}
+            stages={effectivePlan}
+            stagesDone={m.stagesDone}
+            onToggleStage={toggleStage}
+          />
+          {setData && (
+            <div className="mt-4 pt-3 flex gap-2" style={{ borderTop: `1px solid ${C.grayLine}` }}>
+              <input
+                className={`${inputCls} flex-1`}
+                style={inputStyle}
+                placeholder="Add a personal goal…"
+                value={newGoalLabel}
+                onChange={(e) => setNewGoalLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addGoal(); }}
+              />
+              <Btn kind="ghost" onClick={addGoal} disabled={!newGoalLabel.trim()}>Add goal</Btn>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {editingPlan && setData && (
+        <PlanModal
+          member={{ ...m, customPlan: effectivePlan }}
+          onSave={(stages) => {
+            setData((d) => ({
+              ...d,
+              members: d.members.map((mem) =>
+                mem.id === m.id ? { ...mem, customPlan: stages } : mem
+              ),
+            }));
+            setEditingPlan(false);
+          }}
+          onClose={() => setEditingPlan(false)}
+        />
+      )}
+
+      {(m.roles.length > 0 || (m.roleLog && m.roleLog.length > 0)) && (
+        <Card className="p-4" accent={C.blue}>
+          <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>ROLES COMPLETED</div>
+          {m.roles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {m.roles.map((r) => (
+                <span key={r} className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                  style={{ backgroundColor: C.paper, color: C.blueDeep, border: `1px solid ${C.grayLine}` }}>
+                  {r}
+                </span>
+              ))}
+            </div>
+          )}
+          {m.roleLog && m.roleLog.length > 0 && (
+            <div>
+              <div className="text-xs font-bold mb-1" style={{ color: MUTED }}>History</div>
+              <div className="space-y-1">
+                {[...m.roleLog].sort((a, b) => b.date.localeCompare(a.date)).map((entry) => (
+                  <div key={entry.id} className="flex items-center gap-2 text-xs">
+                    <span className="font-semibold" style={{ color: C.blueDeep }}>{entry.role}</span>
+                    <span style={{ color: "#8A958F" }}>· {fmtDate(entry.date)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {(df || m.devNextStep) && (
+        <Card className="p-4" accent={df ? df.fg : C.blue}>
+          <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>DEVELOPMENT</div>
+          {df && <div className="mb-2"><Badge fg={df.fg} bg={df.bg}>{df.label}</Badge></div>}
+          {m.devNextStep && (
+            <div>
+              <div className="text-xs mb-0.5" style={{ color: MUTED }}>Suggested next step</div>
+              <div className="text-sm font-semibold" style={{ color: C.ink }}>{m.devNextStep}</div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {myRecognitions.length > 0 && (
+        <Card className="p-4" accent={C.gold}>
+          <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>RECOGNITIONS</div>
+          <div className="space-y-1.5">
+            {myRecognitions.map((r) => (
+              <div key={r.id} className="flex items-center gap-2 text-sm">
+                <span style={{ color: C.gold }}>★</span>
+                <span className="font-semibold" style={{ color: C.blueDeep }}>{r.type}</span>
+                {r.detail && <span style={{ color: MUTED }}>— {r.detail}</span>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {goals.length > 0 && (
+        <Card className="p-4" accent={C.maroon}>
+          <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>
+            HOW YOU CAN HELP — EDUCATION GOALS {currentYear}
+          </div>
+          <p className="text-xs mb-3" style={{ color: MUTED }}>
+            The club has set level-completion targets for this year. Completing your next Pathways level directly helps us hit these goals.
+          </p>
+          <div className="space-y-3">
+            {goals.map((g) => {
+              const completed = (allMembers || []).filter((mem) => {
+                const date = (mem.levelDates || {})[String(g.level)];
+                return date && date.startsWith(String(currentYear));
+              }).length;
+              const pct = g.target > 0 ? Math.min(100, Math.round((completed / g.target) * 100)) : 0;
+              const hit = completed >= g.target;
+              const isMyLevel = g.level === myLevel;
+              const alreadyDone = !!(m.levelDates || {})[String(g.level)];
+              return (
+                <div key={g.id}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-semibold" style={{ color: isMyLevel ? C.maroon : C.blueDeep }}>
+                      Level {g.level} — {completed}/{g.target} completed
+                      {isMyLevel && !alreadyDone && (
+                        <span className="ml-2 font-normal" style={{ color: C.maroon }}>← you're working on this!</span>
+                      )}
+                      {alreadyDone && <span className="ml-2" style={{ color: C.green }}>✓ you've done this</span>}
+                    </span>
+                    <span style={{ color: hit ? C.green : C.ink }}>{pct}%</span>
+                  </div>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: C.grayLine }}>
+                    <div className="h-full rounded-full"
+                      style={{ width: `${pct}%`, backgroundColor: hit ? C.green : C.maroon }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ---------- Member self-registration form ----------
+function MemberSelfAdd({ name, onSave }) {
+  const [m, setM] = useState({
+    id: uid(), name, paths: [], level: 1, currentProject: "",
+    lastAttended: "", totalMeetings: 0, roles: [], isNew: false,
+    onboardingStart: "", notes: "", roleLog: [], devFeeling: "", devNextStep: "", levelDates: {},
+  });
+  const set = (k, v) => setM((p) => ({ ...p, [k]: v }));
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <span className="block mb-1 text-sm font-semibold" style={{ color: C.blueDeep }}>Pathways path(s)</span>
+        <div className="flex flex-wrap gap-1.5">
+          {PATHS.map((p) => {
+            const on = m.paths.includes(p);
+            return (
+              <button key={p} type="button"
+                onClick={() => set("paths", on ? m.paths.filter((x) => x !== p) : [...m.paths, p])}
+                className="px-2 py-1 rounded-full text-xs font-semibold"
+                style={{
+                  backgroundColor: on ? C.blue : "white",
+                  color: on ? "white" : C.blue,
+                  border: `1px solid ${on ? C.blue : C.grayLine}`,
+                }}>
+                {p}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <Field label="Current level (working on)">
+        <select className={inputCls} style={inputStyle} value={m.level}
+          onChange={(e) => set("level", Number(e.target.value))}>
+          {[1, 2, 3, 4, 5].map((l) => <option key={l} value={l}>Level {l}</option>)}
+        </select>
+      </Field>
+      <Field label="Current project (optional)">
+        <input className={inputCls} style={inputStyle} value={m.currentProject}
+          onChange={(e) => set("currentProject", e.target.value)}
+          placeholder="e.g. Researching and Presenting" />
+      </Field>
+      <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
+        <input type="checkbox" checked={m.isNew} onChange={(e) => set("isNew", e.target.checked)} />
+        I'm a new member
+      </label>
+      <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
+        <input type="checkbox"
+          checked={!!m.onboardingStart}
+          onChange={(e) => set("onboardingStart", e.target.checked ? new Date().toISOString().slice(0, 10) : "")} />
+        Opt into 100-day plan
+      </label>
+      {m.onboardingStart && (
+        <Field label="Plan start date">
+          <input type="date" className={inputCls} style={inputStyle} value={m.onboardingStart}
+            onChange={(e) => set("onboardingStart", e.target.value)} />
+        </Field>
+      )}
+      <Btn kind="maroon" className="w-full" onClick={() => onSave(m)}>Save my info</Btn>
+    </div>
+  );
+}
+
+// ---------- Member portal (name entry → profile or self-registration) ----------
+function MemberPortalView({ data, setData, onSwitchToAdmin }) {
+  const [nameInput, setNameInput] = useState("");
+  const [searched, setSearched] = useState(false);
+
+  const trimmed = nameInput.trim();
+  const member = (data && trimmed)
+    ? data.members.find((m) => m.name.toLowerCase() === trimmed.toLowerCase()) || null
+    : null;
+
+
+  const handleSearch = (e) => {
+    e && e.preventDefault();
+    if (trimmed) setSearched(true);
+  };
+
+  const handleAddSelf = (newMember) => {
+    if (!data) {
+      setData({ ...emptyData(), members: [newMember] });
+    } else {
+      setData((d) => ({ ...d, members: [...d.members, newMember] }));
+    }
+  };
+
+  const reset = () => { setSearched(false); setNameInput(""); };
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: C.paper, color: C.ink }}>
+      <header className="sticky top-0 z-40 px-4 py-3 flex items-center justify-between"
+        style={{ backgroundColor: C.blue }}>
+        <div>
+          <div className="text-xs tracking-widest font-bold" style={{ color: C.gold }}>TOASTMASTERS</div>
+          <div className="text-base text-white" style={{ fontFamily: SERIF }}>
+            {member ? member.name : "Member Portal"}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {searched && (
+            <button className="text-sm underline" style={{ color: "rgba(255,255,255,0.75)" }} onClick={reset}>
+              ← Back
+            </button>
+          )}
+          <button className="text-xs px-2 py-1 rounded font-semibold"
+            style={{ backgroundColor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.75)" }}
+            onClick={onSwitchToAdmin}>
+            Admin →
+          </button>
+        </div>
+      </header>
+
+      <div className="p-4 sm:p-6">
+        {!searched ? (
+          <div className="max-w-sm mx-auto mt-12">
+            <div className="text-center mb-8">
+              <h2 className="text-2xl mb-2" style={{ fontFamily: SERIF, color: C.blue }}>Welcome</h2>
+              <p className="text-sm" style={{ color: MUTED }}>Enter your name to view your progress.</p>
+            </div>
+            <form onSubmit={handleSearch} className="flex gap-2">
+              <input
+                className={`${inputCls} flex-1`}
+                style={inputStyle}
+                placeholder="Your name…"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                autoFocus
+              />
+              <Btn kind="maroon" onClick={handleSearch} disabled={!trimmed}>Go</Btn>
+            </form>
+          </div>
+        ) : member ? (
+          <MemberProfileCard
+            member={member}
+            recognitions={data?.recognitions || []}
+            educationGoals={data?.educationGoals || []}
+            allMembers={data?.members || []}
+            setData={setData}
+            onboardingTemplate={data?.onboardingTemplate}
+          />
+        ) : (
+          <div className="max-w-sm mx-auto mt-8">
+            <Card className="p-5" accent={C.maroon}>
+              <h3 className="text-lg mb-1" style={{ fontFamily: SERIF, color: C.blue }}>
+                Hi, {trimmed}!
+              </h3>
+              <p className="text-sm mb-4" style={{ color: MUTED }}>
+                We don't have a record for you yet. Fill in a few basics and your VPE can add the rest.
+              </p>
+              <MemberSelfAdd name={trimmed} onSave={handleAddSelf} />
+            </Card>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bulk member import modal ----------
+// ---------- Bulk member editor (full-screen spreadsheet) ----------
+// ---------- Compact multi-select cells for BulkEditModal ----------
+function PathsCell({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const toggle = (p) =>
+    onChange(value.includes(p) ? value.filter((x) => x !== p) : [...value, p]);
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        className="cursor-pointer rounded border px-1.5 py-1 flex flex-wrap gap-0.5 items-center"
+        style={{ minHeight: "28px", borderColor: C.grayLine, backgroundColor: "white" }}>
+        {value.length === 0
+          ? <span className="text-xs" style={{ color: MUTED }}>Select paths…</span>
+          : value.map((p) => (
+            <span key={p} className="text-xs px-1 py-0.5 rounded"
+              style={{ backgroundColor: C.paper, color: C.blueDeep, border: `1px solid ${C.grayLine}` }}>
+              {p}
+            </span>
+          ))}
+      </div>
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
+          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100, backgroundColor: "white",
+            border: `1px solid ${C.grayLine}`, borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+            minWidth: 220, padding: "6px 0" }}>
+            {PATHS.map((p) => (
+              <label key={p} className="flex items-center gap-2 px-3 py-1 cursor-pointer text-xs"
+                style={{ color: C.ink }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = C.paper}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
+                <input type="checkbox" checked={value.includes(p)}
+                  onChange={() => toggle(p)} onClick={(e) => e.stopPropagation()} />
+                {p}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BuddyGroupCell({ value, groups, onChange }) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id) =>
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const selectedNames = groups.filter((g) => value.includes(g.id)).map((g) => g.name);
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        className="cursor-pointer rounded border px-1.5 py-1 flex flex-wrap gap-0.5 items-center"
+        style={{ minHeight: "28px", borderColor: C.grayLine, backgroundColor: "white" }}>
+        {selectedNames.length === 0
+          ? <span className="text-xs" style={{ color: MUTED }}>None</span>
+          : selectedNames.map((n) => (
+            <span key={n} className="text-xs px-1 py-0.5 rounded"
+              style={{ backgroundColor: C.paper, color: C.maroon, border: `1px solid ${C.grayLine}` }}>
+              {n}
+            </span>
+          ))}
+      </div>
+      {open && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
+          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100, backgroundColor: "white",
+            border: `1px solid ${C.grayLine}`, borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+            minWidth: 180, padding: "6px 0" }}>
+            {groups.length === 0
+              ? <p className="text-xs px-3 py-1.5" style={{ color: MUTED }}>No groups created yet.</p>
+              : groups.map((g) => (
+                <label key={g.id} className="flex items-center gap-2 px-3 py-1 cursor-pointer text-xs"
+                  style={{ color: C.ink }}
+                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = C.paper}
+                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
+                  <input type="checkbox" checked={value.includes(g.id)}
+                    onChange={() => toggle(g.id)} onClick={(e) => e.stopPropagation()} />
+                  {g.name}
+                </label>
+              ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BulkEditModal({ data, onSave, onClose }) {
+  const [search, setSearch] = useState("");
+
+  const getGroupIds = (memberId) =>
+    (data.buddyGroups || []).filter((g) => g.memberIds.includes(memberId)).map((g) => g.id);
+
+  const [rows, setRows] = useState(() =>
+    data.members.map((m) => ({
+      ...m,
+      paths: memberPaths(m),
+      _buddyGroupIds: getGroupIds(m.id),
+    }))
+  );
+
+  const trimSearch = search.trim().toLowerCase();
+  const visibleRows = trimSearch
+    ? rows.filter((r) => r.name.toLowerCase().includes(trimSearch))
+    : rows;
+
+  const update = (id, k, v) =>
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [k]: v } : r)));
+
+  const addRow = () => {
+    setRows((prev) => [
+      ...prev,
+      {
+        id: uid(), name: "", paths: [], level: 1, currentProject: "",
+        lastAttended: "", totalMeetings: 0, roles: [], isNew: false,
+        onboardingStart: "", notes: "", roleLog: [], devFeeling: "", devNextStep: "", levelDates: {},
+        _buddyGroupIds: [],
+      },
+    ]);
+    setSearch("");
+  };
+
+  const removeRow = (id) => setRows((prev) => prev.filter((r) => r.id !== id));
+
+  const handleSave = () => {
+    const cleanRows = rows.filter((r) => r.name.trim());
+    const members = cleanRows.map(({ _buddyGroupIds, ...r }) => r);
+    const buddyGroups = (data.buddyGroups || []).map((g) => ({
+      ...g,
+      memberIds: cleanRows
+        .filter((r) => (r._buddyGroupIds || []).includes(g.id))
+        .map((r) => r.id),
+    }));
+    onSave({ members, buddyGroups });
+  };
+
+  const th = "px-2 py-2 text-left text-xs font-bold whitespace-nowrap sticky top-0";
+  const td = "px-1 py-1 align-middle";
+  const cell = `${inputCls} text-xs`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: C.paper, color: C.ink }}>
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 shrink-0"
+        style={{ backgroundColor: C.blue, borderBottom: `3px solid ${C.maroon}` }}>
+        <span className="text-white font-semibold" style={{ fontFamily: SERIF, fontSize: "1.05rem" }}>
+          Bulk member editor
+        </span>
+        <div className="flex items-center gap-1.5 ml-2">
+          <input
+            className={inputCls}
+            style={{ ...inputStyle, width: "200px", backgroundColor: "rgba(255,255,255,0.12)", color: "white", borderColor: "rgba(255,255,255,0.25)" }}
+            placeholder="Search members…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <span className="text-xs" style={{ color: "rgba(255,255,255,0.55)" }}>
+            {visibleRows.length}/{rows.length}
+          </span>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <Btn kind="ghost" onClick={addRow}>+ Add member</Btn>
+          <Btn kind="maroon" onClick={handleSave}>Save all</Btn>
+          <button onClick={onClose} className="text-white text-2xl leading-none px-2 opacity-70 hover:opacity-100" aria-label="Close">×</button>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
+        <table className="border-collapse text-sm" style={{ minWidth: "1300px", width: "100%" }}>
+          <thead style={{ backgroundColor: C.blueDeep }}>
+            <tr>
+              <th className={th} style={{ color: C.gold, minWidth: "160px" }}>Name *</th>
+              <th className={th} style={{ color: C.gold, minWidth: "220px" }}>Pathways path(s)</th>
+              <th className={th} style={{ color: C.gold, minWidth: "70px" }}>Level</th>
+              <th className={th} style={{ color: C.gold, minWidth: "170px" }}>Current project</th>
+              <th className={th} style={{ color: C.gold, minWidth: "130px" }}>Last attended</th>
+              <th className={th} style={{ color: C.gold, minWidth: "80px" }}>Meetings</th>
+              <th className={th} style={{ color: C.gold, minWidth: "55px", textAlign: "center" }}>New?</th>
+              <th className={th} style={{ color: C.gold, minWidth: "130px" }}>100-day plan start</th>
+              <th className={th} style={{ color: C.gold, minWidth: "120px" }}>Dev feeling</th>
+              <th className={th} style={{ color: C.gold, minWidth: "170px" }}>Next step</th>
+              <th className={th} style={{ color: C.gold, minWidth: "170px" }}>Notes</th>
+              <th className={th} style={{ color: C.gold, minWidth: "160px" }}>Buddy group(s)</th>
+              <th className={th} style={{ color: C.gold, minWidth: "36px" }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.length === 0 && (
+              <tr>
+                <td colSpan={13} className="px-4 py-10 text-center" style={{ color: MUTED }}>
+                  {rows.length === 0
+                    ? "No members yet — click '+ Add member' to start."
+                    : "No members match your search."}
+                </td>
+              </tr>
+            )}
+            {visibleRows.map((r, i) => (
+              <tr key={r.id}
+                style={{
+                  backgroundColor: i % 2 === 0 ? "white" : C.paper,
+                  borderBottom: `1px solid ${C.grayLine}`,
+                }}>
+                <td className={td}>
+                  <input className={cell} style={inputStyle} value={r.name}
+                    onChange={(e) => update(r.id, "name", e.target.value)}
+                    placeholder="Full name" />
+                </td>
+                <td className={td}>
+                  <PathsCell
+                    value={r.paths || []}
+                    onChange={(v) => update(r.id, "paths", v)}
+                  />
+                </td>
+                <td className={td}>
+                  <select className={cell} style={inputStyle} value={r.level}
+                    onChange={(e) => update(r.id, "level", Number(e.target.value))}>
+                    {[1, 2, 3, 4, 5].map((l) => <option key={l} value={l}>Level {l}</option>)}
+                  </select>
+                </td>
+                <td className={td}>
+                  <input className={cell} style={inputStyle} value={r.currentProject || ""}
+                    onChange={(e) => update(r.id, "currentProject", e.target.value)}
+                    placeholder="Project name" />
+                </td>
+                <td className={td}>
+                  <input type="date" className={cell} style={inputStyle} value={r.lastAttended || ""}
+                    onChange={(e) => update(r.id, "lastAttended", e.target.value)} />
+                </td>
+                <td className={td}>
+                  <input type="number" min="0" className={cell} style={inputStyle}
+                    value={r.totalMeetings ?? 0}
+                    onChange={(e) => update(r.id, "totalMeetings", Math.max(0, Number(e.target.value)))} />
+                </td>
+                <td className={td} style={{ textAlign: "center" }}>
+                  <input type="checkbox" checked={!!r.isNew}
+                    onChange={(e) => update(r.id, "isNew", e.target.checked)} />
+                </td>
+                <td className={td}>
+                  <input type="date" className={cell} style={inputStyle} value={r.onboardingStart || ""}
+                    onChange={(e) => update(r.id, "onboardingStart", e.target.value)} />
+                </td>
+                <td className={td}>
+                  <select className={cell} style={inputStyle} value={r.devFeeling || ""}
+                    onChange={(e) => update(r.id, "devFeeling", e.target.value)}>
+                    <option value="">—</option>
+                    <option value="thriving">Thriving</option>
+                    <option value="good">Good</option>
+                    <option value="unsure">Unsure</option>
+                    <option value="struggling">Struggling</option>
+                  </select>
+                </td>
+                <td className={td}>
+                  <input className={cell} style={inputStyle} value={r.devNextStep || ""}
+                    onChange={(e) => update(r.id, "devNextStep", e.target.value)}
+                    placeholder="Suggested next step" />
+                </td>
+                <td className={td}>
+                  <input className={cell} style={inputStyle} value={r.notes || ""}
+                    onChange={(e) => update(r.id, "notes", e.target.value)}
+                    placeholder="Notes" />
+                </td>
+                <td className={td}>
+                  <BuddyGroupCell
+                    value={r._buddyGroupIds || []}
+                    groups={data.buddyGroups || []}
+                    onChange={(v) => update(r.id, "_buddyGroupIds", v)}
+                  />
+                </td>
+                <td className={td} style={{ textAlign: "center" }}>
+                  <button className="text-xs px-1" style={{ color: C.red }}
+                    onClick={() => removeRow(r.id)} title="Remove member">✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-3 flex flex-wrap items-center gap-4 shrink-0"
+        style={{ borderTop: `1px solid ${C.grayLine}`, backgroundColor: "white" }}>
+        <span className="text-xs" style={{ color: MUTED }}>
+          Click Pathways or Buddy group cells to open a multi-select dropdown. Buddy group changes apply to all group members.
+        </span>
+        <div className="ml-auto flex gap-2">
+          <Btn kind="ghost" onClick={onClose}>Cancel</Btn>
+          <Btn kind="maroon" onClick={handleSave}>Save all changes</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Buddy groups admin panel ----------
+function BuddyGroupsAdmin({ data, setData }) {
+  const [open, setOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const groups = data.buddyGroups || [];
+
+  const addGroup = () => {
+    const name = newName.trim();
+    if (!name) return;
+    setData((d) => ({ ...d, buddyGroups: [...(d.buddyGroups || []), { id: uid(), name, memberIds: [] }] }));
+    setNewName("");
+  };
+
+  const updateGroup = (id, fn) =>
+    setData((d) => ({ ...d, buddyGroups: (d.buddyGroups || []).map((g) => g.id === id ? fn(g) : g) }));
+
+  const removeGroup = (id) => {
+    if (window.confirm("Delete this buddy group?"))
+      setData((d) => ({ ...d, buddyGroups: (d.buddyGroups || []).filter((g) => g.id !== id) }));
+  };
+
+  return (
+    <div className="mt-6">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-sm font-semibold mb-3 w-full text-left"
+        style={{ color: C.blueDeep }}>
+        <span style={{ color: C.maroon }}>{open ? "▲" : "▼"}</span>
+        Buddy Groups {open ? "(hide)" : `(${groups.length} group${groups.length !== 1 ? "s" : ""})`}
+      </button>
+
+      {open && (
+        <div className="space-y-3">
+          <Card className="p-4" accent={C.blue}>
+            <h3 className="text-sm font-bold mb-3" style={{ color: C.blueDeep }}>Create a new group</h3>
+            <div className="flex gap-2">
+              <input className={`${inputCls} flex-1`} style={inputStyle}
+                placeholder="Group name (e.g. Group A, Team Spark…)"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addGroup(); }} />
+              <Btn kind="maroon" onClick={addGroup} disabled={!newName.trim()}>Create</Btn>
+            </div>
+          </Card>
+
+          {groups.length === 0 && (
+            <p className="text-sm" style={{ color: MUTED }}>No buddy groups yet — create one above.</p>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {groups.map((g) => {
+              const groupMembers = g.memberIds
+                .map((id) => data.members.find((m) => m.id === id))
+                .filter(Boolean);
+              const unassigned = data.members.filter((m) => !g.memberIds.includes(m.id));
+              return (
+                <Card key={g.id} className="p-4" accent={C.maroon}>
+                  <div className="flex items-center justify-between mb-3">
+                    <input
+                      className="font-bold text-sm bg-transparent focus:outline-none focus:ring-1 rounded px-1"
+                      style={{ color: C.blueDeep, border: "1px solid transparent", fontFamily: SERIF }}
+                      value={g.name}
+                      onChange={(e) => updateGroup(g.id, (grp) => ({ ...grp, name: e.target.value }))}
+                    />
+                    <button className="text-xs" style={{ color: "#8A958F" }} onClick={() => removeGroup(g.id)}>
+                      Delete group
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 mb-3 min-h-6">
+                    {groupMembers.length === 0 && (
+                      <span className="text-xs" style={{ color: MUTED }}>No members yet.</span>
+                    )}
+                    {groupMembers.map((m) => (
+                      <span key={m.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+                        style={{ backgroundColor: C.paper, color: C.blueDeep, border: `1px solid ${C.grayLine}` }}>
+                        {m.name}
+                        <button
+                          onClick={() => updateGroup(g.id, (grp) => ({ ...grp, memberIds: grp.memberIds.filter((id) => id !== m.id) }))}
+                          className="ml-0.5 leading-none" style={{ color: "#8A958F" }} aria-label="Remove">×</button>
+                      </span>
+                    ))}
+                  </div>
+
+                  {unassigned.length > 0 && (
+                    <select
+                      className={`${inputCls} text-xs`} style={inputStyle}
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value)
+                          updateGroup(g.id, (grp) => ({ ...grp, memberIds: [...grp.memberIds, e.target.value] }));
+                      }}>
+                      <option value="">Add member…</option>
+                      {unassigned.sort((a, b) => a.name.localeCompare(b.name)).map((m) => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Views ----------
 function HomeView({ data, go }) {
   const dormant = data.members.filter((m) => memberStatus(m).key === "dormant");
-  const newbies = data.members.filter((m) => m.isNew);
+  const newbies = data.members.filter((m) => m.onboardingStart);
   const activeCycle = data.cycles.find((c) => c.id === currentCycleId(data.cycles));
   const unposted = data.recognitions.filter((r) => !r.posted);
   const openActions = (activeCycle?.actions || []).filter((a) => !a.done);
@@ -712,6 +1671,7 @@ function MembersView({ data, setData, initialFilter }) {
   const [filter, setFilter] = useState(initialFilter || "all");
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null); // member object or "new"
+  const [showBulk, setShowBulk] = useState(false);
 
   const filtered = useMemo(() => {
     return data.members
@@ -733,6 +1693,11 @@ function MembersView({ data, setData, initialFilter }) {
       return { ...d, members: exists ? d.members.map((x) => (x.id === m.id ? m : x)) : [...d.members, m] };
     });
     setEditing(null);
+  };
+
+  const bulkSave = ({ members, buddyGroups }) => {
+    setData((d) => ({ ...d, members, buddyGroups }));
+    setShowBulk(false);
   };
 
   const deleteMember = (id) => {
@@ -763,6 +1728,7 @@ function MembersView({ data, setData, initialFilter }) {
         ))}
         <input className={`${inputCls} max-w-xs ml-auto`} style={inputStyle}
           placeholder="Search by name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <Btn kind="ghost" onClick={() => setShowBulk(true)}>Bulk edit</Btn>
         <Btn kind="maroon" onClick={() => setEditing("new")}>+ Add member</Btn>
       </div>
 
@@ -831,7 +1797,7 @@ function MembersView({ data, setData, initialFilter }) {
                   </div>
                 )}
 
-                {m.isNew && (
+                {m.onboardingStart && (
                   <div className="mt-1 p-2 rounded" style={{ backgroundColor: C.paper }}>
                     <div className="text-xs font-bold mb-1" style={{ color: C.maroon }}>100-day plan</div>
                     <OnboardingBar startISO={m.onboardingStart} stages={m.customPlan} compact />
@@ -860,23 +1826,34 @@ function MembersView({ data, setData, initialFilter }) {
       {editing && (
         <MemberModal
           initial={editing === "new" ? null : editing}
+          onboardingTemplate={data.onboardingTemplate}
           onSave={saveMember}
           onClose={() => setEditing(null)}
         />
       )}
+      {showBulk && (
+        <BulkEditModal data={data} onSave={bulkSave} onClose={() => setShowBulk(false)} />
+      )}
+
+      <BuddyGroupsAdmin data={data} setData={setData} />
     </div>
   );
 }
 
 function OnboardingView({ data, setData }) {
-  const newbies = data.members.filter((m) => m.isNew);
-  const [editingPlan, setEditingPlan] = useState(null); // member object
+  const newbies = data.members.filter((m) => m.onboardingStart);
+  const [editingPlan, setEditingPlan] = useState(null); // member object or "template"
+  const template = data.onboardingTemplate || ONBOARDING_STAGES;
 
   const savePlan = (stages) => {
-    setData((d) => ({
-      ...d,
-      members: d.members.map((m) => (m.id === editingPlan.id ? { ...m, customPlan: stages } : m)),
-    }));
+    if (editingPlan === "template") {
+      setData((d) => ({ ...d, onboardingTemplate: stages }));
+    } else {
+      setData((d) => ({
+        ...d,
+        members: d.members.map((m) => (m.id === editingPlan.id ? { ...m, customPlan: stages } : m)),
+      }));
+    }
     setEditingPlan(null);
   };
 
@@ -896,10 +1873,36 @@ function OnboardingView({ data, setData }) {
       <SectionTitle sub="Each new member's journey from first visit to Icebreaker. Every plan can be tailored to the member.">
         100-Day Onboarding
       </SectionTitle>
+
+      {/* Global template */}
+      <Card className="p-4 mb-5" accent={C.blue}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-bold" style={{ color: C.blueDeep }}>Club default template</div>
+            <div className="text-xs mt-0.5" style={{ color: MUTED }}>
+              {data.onboardingTemplate ? "Custom template active" : "Using built-in Toastmasters stages"} — applied to all new members automatically.
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {data.onboardingTemplate && (
+              <Btn kind="danger" onClick={() => {
+                if (window.confirm("Reset to the built-in Toastmasters plan?")) {
+                  setData((d) => ({ ...d, onboardingTemplate: null }));
+                }
+              }}>Reset to default</Btn>
+            )}
+            <Btn kind="ghost" onClick={() => setEditingPlan("template")}>Edit template</Btn>
+          </div>
+        </div>
+        <div className="mt-3">
+          <OnboardingBar startISO={null} stages={template} compact />
+        </div>
+      </Card>
+
       {newbies.length === 0 ? (
         <Card className="p-8 text-center">
           <p className="text-sm" style={{ color: "#5B6B73" }}>
-            No members are marked as new. Toggle “New member” on a member record to start their 100-day plan.
+            No members are enrolled in a 100-day plan yet. Open any member record and enable “100-day plan” to get started.
           </p>
         </Card>
       ) : (
@@ -932,7 +1935,11 @@ function OnboardingView({ data, setData }) {
         </div>
       )}
       {editingPlan && (
-        <PlanModal member={editingPlan} onSave={savePlan} onClose={() => setEditingPlan(null)} />
+        <PlanModal
+          member={editingPlan === "template" ? { name: "Club default", customPlan: data.onboardingTemplate } : editingPlan}
+          onSave={savePlan}
+          onClose={() => setEditingPlan(null)}
+        />
       )}
     </div>
   );
@@ -1587,6 +2594,252 @@ function DTMView({ data, setData }) {
   );
 }
 
+// ---------- Meeting Rota ----------
+function RotaMeetingTable({ rows, updateMeeting, updateRole, swapRoles }) {
+  const [swapOpen, setSwapOpen] = useState(null); // { meetingId, roleKey }
+  const th = "px-2 py-2 text-left text-xs font-bold whitespace-nowrap sticky top-0";
+  const td = "px-1 py-1 align-middle";
+  const cell = `${inputCls} text-xs`;
+
+  const openSwap = (meetingId, roleKey, e) => {
+    e.stopPropagation();
+    setSwapOpen((prev) =>
+      prev && prev.meetingId === meetingId && prev.roleKey === roleKey ? null : { meetingId, roleKey }
+    );
+  };
+
+  const doSwap = (targetKey) => {
+    if (!swapOpen) return;
+    swapRoles(swapOpen.meetingId, swapOpen.roleKey, targetKey);
+    setSwapOpen(null);
+  };
+
+  return (
+    <>
+      {swapOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 98 }} onClick={() => setSwapOpen(null)} />
+      )}
+      <table className="border-collapse text-sm" style={{ minWidth: "1100px", width: "100%" }}>
+        <thead style={{ backgroundColor: C.blueDeep }}>
+          <tr>
+            <th className={th} style={{ color: C.gold, minWidth: 130 }}>Date</th>
+            <th className={th} style={{ color: C.gold, minWidth: 150 }}>Theme</th>
+            {ROTA_ROLES.map((r) => (
+              <th key={r.key} className={th} style={{ color: C.gold, minWidth: 120 }}>{r.label}</th>
+            ))}
+            <th className={th} style={{ color: C.gold, width: 36 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={2 + ROTA_ROLES.length + 1} className="px-4 py-8 text-center text-sm" style={{ color: MUTED }}>
+                No meetings yet — use Quick Generate or add one manually.
+              </td>
+            </tr>
+          )}
+          {rows.map((mtg, i) => (
+            <tr key={mtg.id}
+              style={{ backgroundColor: i % 2 === 0 ? "white" : C.paper, borderBottom: `1px solid ${C.grayLine}` }}>
+              <td className={td}>
+                <input type="date" className={cell} style={inputStyle} value={mtg.date || ""}
+                  onChange={(e) => updateMeeting(mtg.id, "date", e.target.value)} />
+              </td>
+              <td className={td}>
+                <input className={cell} style={inputStyle} value={mtg.theme || ""}
+                  onChange={(e) => updateMeeting(mtg.id, "theme", e.target.value)}
+                  placeholder="Meeting theme" />
+              </td>
+              {ROTA_ROLES.map((r) => {
+                const isSwapSrc = swapOpen && swapOpen.meetingId === mtg.id && swapOpen.roleKey === r.key;
+                const isSwapTarget = swapOpen && swapOpen.meetingId === mtg.id && swapOpen.roleKey !== r.key;
+                const val = (mtg.roles || {})[r.key] || "";
+                return (
+                  <td key={r.key} className={td} style={{ position: "relative" }}>
+                    <div className="flex items-center gap-0.5">
+                      <input
+                        className={cell} style={{ ...inputStyle, flex: 1,
+                          outline: isSwapSrc ? `2px solid ${C.gold}` : undefined }}
+                        list="rota-member-names"
+                        value={val}
+                        onChange={(e) => updateRole(mtg.id, r.key, e.target.value)}
+                        placeholder="Name…" />
+                      <button
+                        title="Swap this role with another"
+                        onClick={(e) => openSwap(mtg.id, r.key, e)}
+                        className="shrink-0 text-xs px-0.5 rounded"
+                        style={{ color: isSwapSrc ? C.gold : MUTED, fontWeight: isSwapSrc ? "bold" : "normal" }}>
+                        ⇄
+                      </button>
+                    </div>
+                    {isSwapSrc && isSwapTarget === false && (
+                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100,
+                        backgroundColor: "white", border: `1px solid ${C.grayLine}`,
+                        borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.14)",
+                        minWidth: 180, padding: "6px 0" }}>
+                        <div className="px-3 py-1 text-xs font-bold" style={{ color: C.blueDeep }}>
+                          Swap with…
+                        </div>
+                        {ROTA_ROLES.filter((x) => x.key !== r.key).map((x) => {
+                          const xVal = (mtg.roles || {})[x.key] || "";
+                          return (
+                            <button key={x.key}
+                              className="w-full text-left px-3 py-1.5 text-xs"
+                              style={{ color: C.ink }}
+                              onMouseOver={(e) => e.currentTarget.style.backgroundColor = C.paper}
+                              onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                              onClick={() => doSwap(x.key)}>
+                              <span className="font-semibold">{x.label}</span>
+                              {xVal && <span style={{ color: MUTED }}>{" — "}{xVal}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </td>
+                );
+              })}
+              <td className={td} style={{ textAlign: "center" }}>
+                <button className="text-xs px-1" style={{ color: C.red }}
+                  onClick={() => {
+                    if (window.confirm("Remove this meeting from the rota?"))
+                      updateMeeting(mtg.id, "_remove", true);
+                  }} title="Remove">✕</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function RotaView({ data, setData }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const rota = (data.meetingRota || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = rota.filter((r) => r.date >= today);
+  const past = rota.filter((r) => r.date < today);
+  const memberNames = data.members.map((m) => m.name).sort();
+
+  const [showPast, setShowPast] = useState(false);
+  const [genDate, setGenDate] = useState(today);
+  const [genCount, setGenCount] = useState("4");
+  const [genFreq, setGenFreq] = useState("14");
+
+  const updateMeeting = (id, key, value) => {
+    if (key === "_remove") {
+      setData((d) => ({ ...d, meetingRota: (d.meetingRota || []).filter((r) => r.id !== id) }));
+      return;
+    }
+    setData((d) => ({
+      ...d,
+      meetingRota: (d.meetingRota || []).map((r) => r.id === id ? { ...r, [key]: value } : r),
+    }));
+  };
+
+  const updateRole = (id, roleKey, value) =>
+    setData((d) => ({
+      ...d,
+      meetingRota: (d.meetingRota || []).map((r) =>
+        r.id === id ? { ...r, roles: { ...(r.roles || {}), [roleKey]: value } } : r
+      ),
+    }));
+
+  const swapRoles = (meetingId, roleKeyA, roleKeyB) =>
+    setData((d) => ({
+      ...d,
+      meetingRota: (d.meetingRota || []).map((r) => {
+        if (r.id !== meetingId) return r;
+        const roles = { ...(r.roles || {}) };
+        const tmp = roles[roleKeyA] || "";
+        roles[roleKeyA] = roles[roleKeyB] || "";
+        roles[roleKeyB] = tmp;
+        return { ...r, roles };
+      }),
+    }));
+
+  const addBlank = () =>
+    setData((d) => ({
+      ...d,
+      meetingRota: [...(d.meetingRota || []), { id: uid(), date: "", theme: "", roles: {} }],
+    }));
+
+  const generate = () => {
+    const n = Math.min(parseInt(genCount, 10) || 0, 52);
+    const freq = parseInt(genFreq, 10) || 14;
+    if (!genDate || n < 1) return;
+    const start = new Date(genDate + "T00:00:00");
+    const rows = Array.from({ length: n }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i * freq);
+      return { id: uid(), date: d.toISOString().slice(0, 10), theme: "", roles: {} };
+    });
+    setData((d) => ({ ...d, meetingRota: [...(d.meetingRota || []), ...rows] }));
+  };
+
+  const tableProps = { updateMeeting, updateRole, swapRoles };
+
+  return (
+    <div>
+      <datalist id="rota-member-names">
+        {memberNames.map((n) => <option key={n} value={n} />)}
+      </datalist>
+
+      <SectionTitle>Meeting Rota</SectionTitle>
+
+      <Card className="p-4 mb-6" accent={C.gold}>
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>QUICK GENERATE</div>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Start date">
+            <input type="date" className={inputCls} style={inputStyle} value={genDate}
+              onChange={(e) => setGenDate(e.target.value)} />
+          </Field>
+          <Field label="Meetings">
+            <input type="number" min="1" max="52" className={inputCls}
+              style={{ ...inputStyle, width: 80 }}
+              value={genCount} onChange={(e) => setGenCount(e.target.value)} />
+          </Field>
+          <Field label="Frequency">
+            <select className={inputCls} style={inputStyle} value={genFreq}
+              onChange={(e) => setGenFreq(e.target.value)}>
+              <option value="7">Weekly</option>
+              <option value="14">Fortnightly</option>
+              <option value="28">Monthly (4 wks)</option>
+            </select>
+          </Field>
+          <Btn kind="maroon" onClick={generate}>Generate</Btn>
+          <Btn kind="ghost" onClick={addBlank}>+ Add one</Btn>
+        </div>
+        <p className="text-xs mt-2" style={{ color: MUTED }}>
+          Click the ⇄ icon next to any name to swap that role with another in the same meeting.
+        </p>
+      </Card>
+
+      <div className="text-sm font-semibold mb-2" style={{ color: C.blueDeep }}>
+        Upcoming ({upcoming.length})
+      </div>
+      <div className="overflow-x-auto rounded-lg mb-6" style={{ border: `1px solid ${C.grayLine}` }}>
+        <RotaMeetingTable rows={upcoming} {...tableProps} />
+      </div>
+
+      {past.length > 0 && (
+        <div>
+          <button className="flex items-center gap-2 text-sm font-semibold mb-3"
+            style={{ color: MUTED }} onClick={() => setShowPast((v) => !v)}>
+            <span>{showPast ? "▲" : "▼"}</span>
+            Past meetings ({past.length})
+          </button>
+          {showPast && (
+            <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.grayLine}`, opacity: 0.75 }}>
+              <RotaMeetingTable rows={past} {...tableProps} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Main app ----------
 const NAV = [
   { key: "home", label: "Home", icon: "⌂" },
@@ -1596,14 +2849,50 @@ const NAV = [
   { key: "weekly", label: "Weekly", icon: "☑" },
   { key: "recognition", label: "Recognition", short: "Awards", icon: "🏆" },
   { key: "dtm", label: "Education Goals", short: "Goals", icon: "🎖" },
+  { key: "rota", label: "Meeting Rota", short: "Rota", icon: "📋" },
 ];
 
+const LS_KEY = "vpe-dashboard-data";
+
+const loadFromStorage = () => {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const base = emptyData();
+    return {
+      ...base,
+      ...parsed,
+      members: Array.isArray(parsed.members) ? parsed.members : [],
+      cycles: Array.isArray(parsed.cycles) && parsed.cycles.length === 6 ? parsed.cycles : base.cycles,
+      recognitions: Array.isArray(parsed.recognitions) ? parsed.recognitions : [],
+      weeks: Array.isArray(parsed.weeks) ? parsed.weeks : [],
+      educationGoals: Array.isArray(parsed.educationGoals) ? parsed.educationGoals : [],
+      buddyGroups: Array.isArray(parsed.buddyGroups) ? parsed.buddyGroups : [],
+      meetingRota: Array.isArray(parsed.meetingRota) ? parsed.meetingRota : [],
+    };
+  } catch {
+    return null;
+  }
+};
+
 export default function VPEDashboard() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(() => loadFromStorage());
+  const [appMode, setAppMode] = useState("admin"); // "admin" | "member"
+  const [adminUnlocked, setAdminUnlocked] = useState(
+    () => !!sessionStorage.getItem(SS_UNLOCKED_KEY)
+  );
   const [view, setView] = useState("home");
   const [memberFilter, setMemberFilter] = useState("all");
   const [toast, setToast] = useState("");
   const fileRef = useRef(null);
+
+  // Auto-save to localStorage whenever data changes
+  useEffect(() => {
+    if (data) {
+      localStorage.setItem(LS_KEY, JSON.stringify(data));
+    }
+  }, [data]);
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2600); };
 
@@ -1628,6 +2917,8 @@ export default function VPEDashboard() {
           recognitions: Array.isArray(parsed.recognitions) ? parsed.recognitions : [],
           weeks: Array.isArray(parsed.weeks) ? parsed.weeks : [],
           educationGoals: Array.isArray(parsed.educationGoals) ? parsed.educationGoals : [],
+          buddyGroups: Array.isArray(parsed.buddyGroups) ? parsed.buddyGroups : [],
+          meetingRota: Array.isArray(parsed.meetingRota) ? parsed.meetingRota : [],
         });
         notify("Data loaded from file.");
       } catch {
@@ -1661,7 +2952,7 @@ export default function VPEDashboard() {
       "Roles completed": m.roles.join(", "),
       "New member": m.isNew ? "Yes" : "No",
       "Onboarding start": m.onboardingStart || "",
-      "Onboarding day": m.isNew ? (onboardingDay(m.onboardingStart) ?? "") : "",
+      "Onboarding day": m.onboardingStart ? (onboardingDay(m.onboardingStart) ?? "") : "",
       "DTM progress": m.dtm ? `${m.dtm.filter(Boolean).length}/${DTM_REQUIREMENTS.length}` : "",
       Notes: m.notes,
     }));
@@ -1672,8 +2963,34 @@ export default function VPEDashboard() {
     notify("Excel file downloaded.");
   };
 
+  if (appMode === "member") {
+    return (
+      <MemberPortalView
+        data={data}
+        setData={setData}
+        onSwitchToAdmin={() => setAppMode("admin")}
+      />
+    );
+  }
+
+  // Admin auth gate
+  if (!adminUnlocked) {
+    return (
+      <AdminLogin
+        onUnlock={() => setAdminUnlocked(true)}
+        onMemberMode={() => setAppMode("member")}
+      />
+    );
+  }
+
   if (!data) {
-    return <Welcome onStartFresh={() => setData(emptyData())} onLoadFile={loadFile} />;
+    return (
+      <Welcome
+        onStartFresh={() => setData(emptyData())}
+        onLoadFile={loadFile}
+        onMemberMode={() => setAppMode("member")}
+      />
+    );
   }
 
   const unpostedCount = data.recognitions.filter((r) => !r.posted).length;
@@ -1708,6 +3025,13 @@ export default function VPEDashboard() {
               )}
             </button>
           ))}
+          <div className="mt-2 pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.12)" }}>
+            <button onClick={() => setAppMode("member")}
+              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold text-left w-full"
+              style={{ color: "rgba(255,255,255,0.75)", borderLeft: "3px solid transparent" }}>
+              <span aria-hidden>👤</span> Member Portal
+            </button>
+          </div>
         </nav>
         <div className="mt-auto flex flex-col gap-2">
           <a href={CLUB_LINK} target="_blank" rel="noopener noreferrer"
@@ -1721,8 +3045,28 @@ export default function VPEDashboard() {
             className="text-xs underline mt-1" style={{ color: "rgba(255,255,255,0.7)" }}>
             Load a different JSON file
           </button>
+          <button
+            className="text-xs underline mt-0.5"
+            style={{ color: "rgba(255,255,255,0.55)" }}
+            onClick={() => {
+              sessionStorage.removeItem(SS_UNLOCKED_KEY);
+              setAdminUnlocked(false);
+            }}>
+            Lock dashboard
+          </button>
+          <button
+            className="text-xs underline mt-0.5"
+            style={{ color: "rgba(255,255,255,0.35)" }}
+            onClick={() => {
+              if (window.confirm("Clear all saved data and start fresh?")) {
+                localStorage.removeItem(LS_KEY);
+                setData(null);
+              }
+            }}>
+            Clear saved data
+          </button>
           <p className="text-xs mt-2" style={{ color: "rgba(255,255,255,0.45)" }}>
-            Data lives only on this device. Export before you close.
+            Auto-saved in this browser. Export JSON as a backup.
           </p>
         </div>
       </aside>
@@ -1749,6 +3093,7 @@ export default function VPEDashboard() {
         {view === "weekly" && <WeeklyView data={data} setData={setData} />}
         {view === "recognition" && <RecognitionView data={data} setData={setData} />}
         {view === "dtm" && <DTMView data={data} setData={setData} />}
+        {view === "rota" && <RotaView data={data} setData={setData} />}
       </main>
 
       {/* Mobile bottom nav */}

@@ -1,6 +1,7 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "VPE Dashboard",
+  "name": "Toastmasters VPE Dashboard",
+  "description": "VP Education dashboard for member progress, 100-day plans, meeting rota, and education goals.",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,6 +21,6 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "theme_color": "#1B3A6B",
+  "background_color": "#F5F3EE"
 }

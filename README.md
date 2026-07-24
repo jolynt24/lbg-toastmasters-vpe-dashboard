@@ -65,6 +65,14 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/a
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
 
+### Deploying to Vercel
+
+This repo includes a `vercel.json` (build command `npm run build`, output directory `build`, framework `create-react-app`). To deploy:
+
+1. Install the CLI: `npm i -g vercel`
+2. From the project root, run `vercel` and follow the prompts to log in and link the project (or import the repo directly at [vercel.com/new](https://vercel.com/new)).
+3. Run `vercel --prod` for a production deployment.
+
 ### `npm run build` fails to minify
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
