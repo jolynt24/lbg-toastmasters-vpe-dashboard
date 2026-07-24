@@ -1025,7 +1025,15 @@ function MemberSelfAdd({ name, onSave }) {
 function MemberPortalView({ data, setData, onSwitchToAdmin }) {
   const [nameInput, setNameInput] = useState("");
   const [searched, setSearched] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const trimmed = nameInput.trim();
+
+  const suggestions = useMemo(() => {
+    if (!data || !trimmed) return [];
+    const q = trimmed.toLowerCase();
+    return data.members.filter((m) => m.name.toLowerCase().includes(q));
+  }, [data, trimmed]);
+
   const member = (data && trimmed)
     ? data.members.find((m) => m.name.toLowerCase() === trimmed.toLowerCase()) || null
     : null;
@@ -1035,10 +1043,19 @@ function MemberPortalView({ data, setData, onSwitchToAdmin }) {
     .filter((ev) => ev.date >= today)
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  const selectMember = (m) => {
+    setNameInput(m.name);
+    setShowSuggestions(false);
+    setSearched(true);
+  };
 
   const handleSearch = (e) => {
     e && e.preventDefault();
-    if (trimmed) setSearched(true);
+    if (!trimmed) return;
+    // Exact name already typed, or exactly one partial match — go straight there.
+    if (!member && suggestions.length === 1) setNameInput(suggestions[0].name);
+    setShowSuggestions(false);
+    setSearched(true);
   };
 
   const handleAddSelf = (newMember) => {
@@ -1049,7 +1066,7 @@ function MemberPortalView({ data, setData, onSwitchToAdmin }) {
     }
   };
 
-  const reset = () => { setSearched(false); setNameInput(""); };
+  const reset = () => { setSearched(false); setNameInput(""); setShowSuggestions(false); };
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: C.paper, color: C.ink }}>
@@ -1082,15 +1099,38 @@ function MemberPortalView({ data, setData, onSwitchToAdmin }) {
               <h2 className="text-2xl mb-2" style={{ fontFamily: SERIF, color: C.blue }}>Welcome</h2>
               <p className="text-sm" style={{ color: MUTED }}>Enter your name to view your progress.</p>
             </div>
-            <form onSubmit={handleSearch} className="flex gap-2">
-              <input
-                className={`${inputCls} flex-1`}
-                style={inputStyle}
-                placeholder="Your name…"
-                value={nameInput}
-                onChange={(e) => setNameInput(e.target.value)}
-                autoFocus
-              />
+            <form onSubmit={handleSearch} className="flex gap-2" style={{ position: "relative" }}>
+              <div className="relative flex-1">
+                <input
+                  className={`${inputCls} w-full`}
+                  style={inputStyle}
+                  placeholder="Your name…"
+                  value={nameInput}
+                  onChange={(e) => { setNameInput(e.target.value); setShowSuggestions(true); }}
+                  onFocus={() => setShowSuggestions(true)}
+                  autoFocus
+                />
+                {showSuggestions && trimmed && suggestions.length > 0 && (
+                  <>
+                    <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setShowSuggestions(false)} />
+                    <div className="absolute left-0 right-0 mt-1 rounded-lg overflow-hidden"
+                      style={{ backgroundColor: "white", border: `1px solid ${C.grayLine}`,
+                        boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 100, maxHeight: 240, overflowY: "auto" }}>
+                      {suggestions.map((m) => (
+                        <button key={m.id} type="button"
+                          className="w-full text-left px-3 py-2 text-sm"
+                          style={{ color: C.ink }}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => selectMember(m)}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = C.paper}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}>
+                          {m.name}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               <Btn kind="maroon" onClick={handleSearch} disabled={!trimmed}>Go</Btn>
             </form>
           </div>
@@ -2880,10 +2920,11 @@ export default function VPEDashboard() {
   const [memberFilter, setMemberFilter] = useState("all");
   const [toast, setToast] = useState("");
   const [syncStatus, setSyncStatus] = useState("idle"); // "loading"|"ok"|"error"|"idle"
+  const [cloudChecked, setCloudChecked] = useState(!IS_CLOUD);
   const fileRef = useRef(null);
   const syncTimer = useRef(null);
 
-  // Load from cloud on first mount
+  // Load from cloud on first mount — blob storage is the source of truth when deployed.
   useEffect(() => {
     setSyncStatus("loading");
     cloudLoad().then((cloudData) => {
@@ -2892,6 +2933,7 @@ export default function VPEDashboard() {
         try { localStorage.setItem(LS_KEY, JSON.stringify(cloudData)); } catch {}
       }
       setSyncStatus(cloudData ? "ok" : "idle");
+      setCloudChecked(true);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2991,6 +3033,15 @@ export default function VPEDashboard() {
   }
 
   if (!data) {
+    if (!cloudChecked) {
+      return (
+        <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.blue }}>
+          <div className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>
+            Checking cloud storage…
+          </div>
+        </div>
+      );
+    }
     return (
       <Welcome
         onStartFresh={() => setData(emptyData())}
