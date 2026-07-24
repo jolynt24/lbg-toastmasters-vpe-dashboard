@@ -344,7 +344,7 @@ function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
     set("roles", m.roles.includes(r) ? m.roles.filter((x) => x !== r) : [...m.roles, r]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 sm:p-6 overflow-y-auto"
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 px-3 pb-6 sm:pt-16 sm:px-6 overflow-y-auto"
       style={{ backgroundColor: "rgba(0,49,77,0.55)" }}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl my-6"
         style={{ borderTop: `5px solid ${C.maroon}` }}>
@@ -628,7 +628,7 @@ function PlanModal({ member, onSave, onClose }) {
     s.label.trim() && s.from <= s.to && (i === 0 || s.from > stages[i - 1].to));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 sm:p-6 overflow-y-auto"
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 px-3 pb-6 sm:pt-16 sm:px-6 overflow-y-auto"
       style={{ backgroundColor: "rgba(0,49,77,0.55)" }}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-xl my-6" style={{ borderTop: `5px solid ${C.maroon}` }}>
         <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: `1px solid ${C.grayLine}` }}>
@@ -2876,6 +2876,31 @@ const loadFromStorage = () => {
   }
 };
 
+const WRITE_TOKEN = process.env.REACT_APP_WRITE_TOKEN || "";
+
+async function cloudLoad() {
+  try {
+    const res = await fetch("/api/data");
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function cloudSave(data) {
+  try {
+    const res = await fetch("/api/data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-write-token": WRITE_TOKEN },
+      body: JSON.stringify(data),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export default function VPEDashboard() {
   const [data, setData] = useState(() => loadFromStorage());
   const [appMode, setAppMode] = useState("admin"); // "admin" | "member"
@@ -2885,13 +2910,31 @@ export default function VPEDashboard() {
   const [view, setView] = useState("home");
   const [memberFilter, setMemberFilter] = useState("all");
   const [toast, setToast] = useState("");
+  const [syncStatus, setSyncStatus] = useState("idle"); // "loading"|"ok"|"error"|"idle"
   const fileRef = useRef(null);
+  const syncTimer = useRef(null);
 
-  // Auto-save to localStorage whenever data changes
+  // Load from cloud on first mount
   useEffect(() => {
-    if (data) {
-      localStorage.setItem(LS_KEY, JSON.stringify(data));
-    }
+    setSyncStatus("loading");
+    cloudLoad().then((cloudData) => {
+      if (cloudData) {
+        setData(cloudData);
+        try { localStorage.setItem(LS_KEY, JSON.stringify(cloudData)); } catch {}
+      }
+      setSyncStatus(cloudData ? "ok" : "idle");
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save to localStorage immediately; debounce cloud sync by 3 s
+  useEffect(() => {
+    if (!data) return;
+    try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch {}
+    clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      setSyncStatus("loading");
+      cloudSave(data).then((ok) => setSyncStatus(ok ? "ok" : "error"));
+    }, 3000);
   }, [data]);
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2600); };
@@ -3039,6 +3082,11 @@ export default function VPEDashboard() {
             style={{ color: C.gold, border: `1px solid rgba(242,223,116,0.4)` }}>
             ↗ toastmasterclub.org
           </a>
+          <div className="flex items-center gap-1.5 text-xs mb-1"
+            style={{ color: syncStatus === "ok" ? "#7EE0A0" : syncStatus === "error" ? "#F4A19A" : "rgba(255,255,255,0.55)" }}>
+            <span>{syncStatus === "loading" ? "⟳" : syncStatus === "ok" ? "✓" : syncStatus === "error" ? "⚠" : "○"}</span>
+            <span>{syncStatus === "loading" ? "Syncing…" : syncStatus === "ok" ? "Saved to cloud" : syncStatus === "error" ? "Cloud sync failed" : "Not connected"}</span>
+          </div>
           <Btn kind="maroon" onClick={exportJSON}>Export JSON</Btn>
           <Btn kind="ghost" onClick={exportExcel}>Export Excel</Btn>
           <button onClick={() => fileRef.current?.click()}
@@ -3066,7 +3114,7 @@ export default function VPEDashboard() {
             Clear saved data
           </button>
           <p className="text-xs mt-2" style={{ color: "rgba(255,255,255,0.45)" }}>
-            Auto-saved in this browser. Export JSON as a backup.
+            Changes sync to Vercel cloud and are saved locally as backup.
           </p>
         </div>
       </aside>
