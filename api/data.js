@@ -2,7 +2,7 @@
 // GET  → returns the stored dashboard JSON
 // POST → overwrites it (requires x-write-token header to match WRITE_TOKEN env var)
 
-const { put, list } = require("@vercel/blob");
+const { put, get } = require("@vercel/blob");
 
 const BLOB_PATH = "vpe-dashboard.json";
 
@@ -15,24 +15,15 @@ module.exports = async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // ── GET: find the blob and return its JSON ───────────────────────────────
+  // ── GET: fetch the blob directly by pathname and return its JSON ─────────
   if (req.method === "GET") {
     try {
-      const { blobs } = await list({ prefix: BLOB_PATH });
-      if (blobs.length === 0) return res.status(200).json(null);
+      // useCache: false — always read the latest write, never a stale CDN copy.
+      const result = await get(BLOB_PATH, { access: "private", useCache: false });
+      if (!result) return res.status(200).json(null);
 
-      // downloadUrl is a pre-signed URL valid for this request
-      const blob = blobs[0];
-      const fetchUrl = blob.downloadUrl || blob.url;
-      const dataRes = await fetch(fetchUrl, {
-        headers: blob.downloadUrl
-          ? {} // pre-signed, no auth needed
-          : { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
-      });
-
-      if (!dataRes.ok) return res.status(200).json(null);
-      const data = await dataRes.json();
-      return res.status(200).json(data);
+      const text = await new Response(result.stream).text();
+      return res.status(200).json(JSON.parse(text));
     } catch (err) {
       console.error("Blob read error:", err.message);
       return res.status(503).json({ error: "Storage unavailable" });
