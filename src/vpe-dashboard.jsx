@@ -221,7 +221,7 @@ function Welcome({ onStartFresh, onLoadFile, onMemberMode }) {
           Members Dashboard
         </h1>
         <p className="text-sm mb-6" style={{ color: "#5B6B73" }}>
-          Your data is saved automatically in this browser. Load a JSON backup to restore a previous session, or start fresh.
+          No data was found in cloud storage. Load a JSON backup to restore a previous session, or start fresh.
         </p>
         <div className="flex flex-col gap-3">
           <Btn onClick={() => fileRef.current?.click()}>Load JSON file</Btn>
@@ -240,7 +240,7 @@ function Welcome({ onStartFresh, onLoadFile, onMemberMode }) {
           onChange={(e) => onLoadFile(e.target.files?.[0])}
         />
         <p className="text-xs mt-6" style={{ color: "#8A958F" }}>
-          Remember to Export JSON before closing — nothing is saved automatically.
+          Changes sync straight to Vercel cloud storage — nothing is saved in this browser.
         </p>
         <a href={CLUB_LINK} target="_blank" rel="noopener noreferrer"
           className="inline-block mt-3 text-xs font-semibold underline" style={{ color: C.blue }}>
@@ -2850,31 +2850,6 @@ const NAV = [
   { key: "events", label: "Events", icon: "📣" },
 ];
 
-const LS_KEY = "vpe-dashboard-data";
-
-const loadFromStorage = () => {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const base = emptyData();
-    return {
-      ...base,
-      ...parsed,
-      members: Array.isArray(parsed.members) ? parsed.members : [],
-      cycles: Array.isArray(parsed.cycles) && parsed.cycles.length === 6 ? parsed.cycles : base.cycles,
-      recognitions: Array.isArray(parsed.recognitions) ? parsed.recognitions : [],
-      weeks: Array.isArray(parsed.weeks) ? parsed.weeks : [],
-      educationGoals: Array.isArray(parsed.educationGoals) ? parsed.educationGoals : [],
-      buddyGroups: Array.isArray(parsed.buddyGroups) ? parsed.buddyGroups : [],
-      meetingRota: Array.isArray(parsed.meetingRota) ? parsed.meetingRota : [],
-      events: Array.isArray(parsed.events) ? parsed.events : [],
-    };
-  } catch {
-    return null;
-  }
-};
-
 const WRITE_TOKEN = process.env.REACT_APP_WRITE_TOKEN || "";
 
 // Only attempt cloud sync when deployed to Vercel (not local dev)
@@ -2913,7 +2888,7 @@ async function cloudSave(data) {
 }
 
 export default function VPEDashboard() {
-  const [data, setData] = useState(() => loadFromStorage());
+  const [data, setData] = useState(null);
   const [appMode, setAppMode] = useState("admin"); // "admin" | "member"
   const [adminUnlocked, setAdminUnlocked] = useState(
     () => !!sessionStorage.getItem(SS_UNLOCKED_KEY)
@@ -2931,20 +2906,16 @@ export default function VPEDashboard() {
   useEffect(() => {
     setSyncStatus("loading");
     cloudLoad().then(({ ok, data: cloudData }) => {
-      if (cloudData) {
-        setData(cloudData);
-        try { localStorage.setItem(LS_KEY, JSON.stringify(cloudData)); } catch {}
-      }
+      if (cloudData) setData(cloudData);
       setSyncStatus(!ok ? "error" : cloudData ? "ok" : "idle");
       setCloudLoadError(!ok);
       setCloudChecked(true);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Save to localStorage immediately; debounce cloud sync by 3 s
+  // Nothing is persisted in the browser — every change debounces straight to the blob.
   useEffect(() => {
     if (!data) return;
-    try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch {}
     clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
       setSyncStatus("loading");
@@ -3142,14 +3113,13 @@ export default function VPEDashboard() {
             style={{ color: "rgba(255,255,255,0.35)" }}
             onClick={() => {
               if (window.confirm("Clear all saved data and start fresh?")) {
-                localStorage.removeItem(LS_KEY);
                 setData(null);
               }
             }}>
             Clear saved data
           </button>
           <p className="text-xs mt-2" style={{ color: "rgba(255,255,255,0.45)" }}>
-            Changes sync to Vercel cloud and are saved locally as backup.
+            Nothing is saved in this browser — every change syncs straight to Vercel cloud storage.
           </p>
         </div>
       </aside>

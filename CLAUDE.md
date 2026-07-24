@@ -1,12 +1,13 @@
 # VPE Dashboard — Claude context
 
 ## What this is
-A single-file React app for a Toastmasters VP Education to manage members, track Pathways progress, run education goals, manage meeting cycles, and handle recognition. All data lives in memory and can be exported/imported as JSON. No backend.
+A single-file React app for a Toastmasters VP Education to manage members, track Pathways progress, run education goals, manage meeting cycles, and handle recognition. Data is persisted to Vercel Blob storage via a serverless API and can also be exported/imported as JSON. Nothing is cached in browser storage — every load reads from the blob and every change debounce-saves back to it.
 
 ## Stack
 - **React 19** (CRA / react-scripts 5)
 - **Tailwind CSS** (via PostCSS)
 - **xlsx** for Excel export
+- **@vercel/blob** for cloud persistence, via `api/data.js` (Vercel serverless function)
 - Single source file: `src/vpe-dashboard.jsx`
 
 ## Architecture — everything is in one file
@@ -80,7 +81,9 @@ A single-file React app for a Toastmasters VP Education to manage members, track
 ```
 
 ## Key design decisions
-- **No backend** — all data stays in the browser. Saved by exporting JSON.
+- **No browser storage** — no `localStorage`/`sessionStorage` caching of app data. `data` state starts `null`; on mount the app fetches `GET /api/data` (Vercel Blob) and only that response populates it. Every change debounce-saves via `POST /api/data`. JSON export/import remains available as a manual backup, but is not part of the load/save path. `sessionStorage` is still used for the admin-unlock flag (`SS_UNLOCKED_KEY`), which is session auth state, not app data.
+- **Local dev has no persistence** — `IS_CLOUD` gates cloud calls off on `localhost`/`127.0.0.1`/`192.168.*`, so `npm start` reloads always start from an empty/Welcome state. This is expected: there is no local fallback store.
+- **`cloudLoad()`/`cloudSave()`** live near the bottom of `src/vpe-dashboard.jsx`, alongside `api/data.js` (the serverless GET/POST handler backed by `@vercel/blob`). `cloudLoad()` returns `{ ok, data }` so "blob is empty" and "storage errored" are distinguishable — a failed load renders an explicit "Can't reach cloud storage" screen instead of silently falling through to the file-upload prompt.
 - **Smart quotes ban** — JSX attribute values must use straight ASCII `"` (U+0022). Curly/smart quotes (U+201C/D) break the Babel JSX parser. Use module-level string constants (e.g. `CLS_DEV_ROW`, `MUTED`) to avoid JSX attribute string literals when in doubt.
 - **`memberStatus(m)`** returns `{ key: "dormant"|"nudge"|"ok", label, fg, bg }`. Members with no `lastAttended` are treated as **dormant** (red).
 - **`memberPaths(m)`** normalises the legacy `path: string` field to `paths: string[]`.
