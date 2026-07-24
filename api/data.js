@@ -15,15 +15,22 @@ module.exports = async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // ── GET: fetch the current blob and return its JSON ──────────────────────
+  // ── GET: find the blob and return its JSON ───────────────────────────────
   if (req.method === "GET") {
     try {
       const { blobs } = await list({ prefix: BLOB_PATH });
       if (blobs.length === 0) return res.status(200).json(null);
 
-      const dataRes = await fetch(blobs[0].url);
-      if (!dataRes.ok) return res.status(200).json(null);
+      // downloadUrl is a pre-signed URL valid for this request
+      const blob = blobs[0];
+      const fetchUrl = blob.downloadUrl || blob.url;
+      const dataRes = await fetch(fetchUrl, {
+        headers: blob.downloadUrl
+          ? {} // pre-signed, no auth needed
+          : { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+      });
 
+      if (!dataRes.ok) return res.status(200).json(null);
       const data = await dataRes.json();
       return res.status(200).json(data);
     } catch (err) {
@@ -41,8 +48,9 @@ module.exports = async function handler(req, res) {
 
     try {
       await put(BLOB_PATH, JSON.stringify(req.body), {
-        access: "public",
+        access: "private",
         allowOverwrite: true,
+        addRandomSuffix: false,
         contentType: "application/json",
       });
       return res.status(200).json({ ok: true });

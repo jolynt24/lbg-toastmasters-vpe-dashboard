@@ -35,21 +35,11 @@ const PATHS = [
 ];
 
 const COMMON_ROLES = [
-  "Timekeeper", "Ah Counter", "Grammarian", "Table Topics Master",
-  "Evaluator", "General Evaluator", "Toastmaster of the Day",
+  "Timekeeper", "Listener", "General Evaluator", "Table Topics Master",
+  "Evaluator", "Toastmaster of the Day",
   "Speaker", "Table Topics Speaker",
 ];
 
-const ROTA_ROLES = [
-  { key: "toastmaster", label: "Toastmaster" },
-  { key: "ttMaster", label: "TT Master" },
-  { key: "ge", label: "Gen. Evaluator" },
-  { key: "speaker1", label: "Speaker 1" },
-  { key: "speaker2", label: "Speaker 2" },
-  { key: "timekeeper", label: "Timekeeper" },
-  { key: "ahCounter", label: "Ah Counter" },
-  { key: "grammarian", label: "Grammarian" },
-];
 
 const ONBOARDING_STAGES = [
   { from: 1, to: 14, label: "Attend & observe" },
@@ -65,33 +55,14 @@ const RECOGNITION_TYPES = [
   "Best Evaluator",
   "First time in a role",
   "Pathways level completion",
+  "Contest winner",
+  "Other",
 ];
 
-const DTM_REQUIREMENTS = [
-  "Complete first learning path",
-  "Complete second learning path",
-  "Serve 12 months as a club officer",
-  "Serve 12 months as a district officer",
-  "Serve as club mentor or club coach",
-  "Serve as club sponsor, or conduct Speechcraft / Youth Leadership",
-  "Complete the DTM project",
-];
 
-const DEFAULT_WEEK_TASKS = [
-  "Ask for role volunteers",
-  "Close meeting notes",
-  "Post recognition to Game Changers",
-];
 
 const CLUB_LINK = "https://toastmasterclub.org";
 
-const DEV_FEELING_MAP = {
-  thriving: { label: "Thriving", fg: "#2E7D32", bg: "#E8F3E9" },
-  good: { label: "Good", fg: "#2E7D32", bg: "#E8F3E9" },
-  unsure: { label: "Needs guidance", fg: "#B45309", bg: "#FCF3E3" },
-  struggling: { label: "Needs support", fg: "#B3261E", bg: "#FBEAE8" },
-};
-const CLS_DEV_ROW = "flex flex-wrap items-center gap-1.5 text-xs";
 const CLS_NOTE_P = "text-xs italic";
 const MUTED = "#5B6B73";
 
@@ -114,7 +85,8 @@ const emptyData = () => ({
   educationGoals: [],
   onboardingTemplate: null, // null = use ONBOARDING_STAGES default
   buddyGroups: [],          // [{ id, name, memberIds: [] }]
-  meetingRota: [],          // [{ id, date, theme, roles: { toastmaster, ttMaster, ge, speaker1, speaker2, timekeeper, ahCounter, grammarian } }]
+  meetingRota: [],          // [{ id, date, theme, roles: {...}, agendaItems: [{ id, memberName, topic }] }]
+  events: [],               // [{ id, title, detail, date, dismissed: [] }]  — pop-up announcements for members
 });
 
 // ---------- Auth ----------
@@ -329,7 +301,7 @@ function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
   const [m, setM] = useState(() => {
     if (!initial) {
       return {
-        id: uid(), name: "", paths: [], level: 1, currentProject: "",
+        id: uid(), name: "", paths: [], level: 1,
         lastAttended: "", totalMeetings: 0, roles: [], isNew: false,
         onboardingStart: "", notes: "", roleLog: [], devFeeling: "", devNextStep: "", levelDates: {},
         customPlan: onboardingTemplate || null,
@@ -337,11 +309,8 @@ function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
     }
     return { ...initial, paths: memberPaths(initial), roleLog: initial.roleLog || [], devFeeling: initial.devFeeling || "", devNextStep: initial.devNextStep || "", levelDates: initial.levelDates || {} };
   });
-  const [customRole, setCustomRole] = useState("");
   const [roleLogDraft, setRoleLogDraft] = useState({ role: "", date: "" });
   const set = (k, v) => setM((p) => ({ ...p, [k]: v }));
-  const toggleRole = (r) =>
-    set("roles", m.roles.includes(r) ? m.roles.filter((x) => x !== r) : [...m.roles, r]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 px-3 pb-6 sm:pt-16 sm:px-6 overflow-y-auto"
@@ -388,73 +357,20 @@ function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
               {[1, 2, 3, 4, 5].map((l) => <option key={l} value={l}>Level {l}</option>)}
             </select>
           </Field>
-          <Field label="Current project">
-            <input className={inputCls} style={inputStyle} value={m.currentProject}
-              onChange={(e) => set("currentProject", e.target.value)} placeholder="e.g. Researching and Presenting" />
-          </Field>
           <Field label="Last attended meeting">
             <input type="date" className={inputCls} style={inputStyle} value={m.lastAttended}
               onChange={(e) => set("lastAttended", e.target.value)} />
           </Field>
-          <Field label="Total meetings attended">
-            <input type="number" min="0" className={inputCls} style={inputStyle} value={m.totalMeetings}
-              onChange={(e) => set("totalMeetings", Math.max(0, Number(e.target.value)))} />
-          </Field>
-
-          <div className="sm:col-span-2">
-            <span className="block mb-1 text-sm font-semibold" style={{ color: C.blueDeep }}>Level completion dates</span>
-            <p className="text-xs mb-2" style={{ color: "#5B6B73" }}>Record the date each Pathways level was completed — used to track education goals.</p>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {[1, 2, 3, 4, 5].map((l) => (
-                <label key={l} className="block text-xs">
-                  <span className="block mb-1 font-semibold" style={{ color: C.blueDeep }}>Level {l}</span>
-                  <input type="date" className={inputCls} style={inputStyle}
-                    value={(m.levelDates || {})[String(l)] || ""}
-                    onChange={(e) => {
-                      const updated = { ...(m.levelDates || {}) };
-                      if (e.target.value) updated[String(l)] = e.target.value;
-                      else delete updated[String(l)];
-                      set("levelDates", updated);
-                    }} />
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div className="sm:col-span-2">
-            <span className="block mb-1 text-sm font-semibold" style={{ color: C.blueDeep }}>Roles completed</span>
-            <div className="flex flex-wrap gap-2">
-              {[...new Set([...COMMON_ROLES, ...m.roles])].map((r) => {
-                const on = m.roles.includes(r);
-                return (
-                  <button key={r} onClick={() => toggleRole(r)}
-                    className="px-2.5 py-1 rounded-full text-xs font-semibold"
-                    style={{
-                      backgroundColor: on ? C.blue : "white",
-                      color: on ? "white" : C.blue,
-                      border: `1px solid ${on ? C.blue : C.grayLine}`,
-                    }}>
-                    {r}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-2 mt-2">
-              <input className={inputCls} style={inputStyle} value={customRole}
-                onChange={(e) => setCustomRole(e.target.value)} placeholder="Add another role…" />
-              <Btn kind="ghost" onClick={() => {
-                const r = customRole.trim();
-                if (r && !m.roles.includes(r)) set("roles", [...m.roles, r]);
-                setCustomRole("");
-              }}>Add</Btn>
-            </div>
-          </div>
 
           <div className="sm:col-span-2 flex flex-wrap items-end gap-4 p-3 rounded-md"
             style={{ backgroundColor: m.isNew ? C.amberBg : C.paper, border: `1px dashed ${C.grayLine}` }}>
             <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
               <input type="checkbox" checked={m.isNew} onChange={(e) => set("isNew", e.target.checked)} />
               New member
+            </label>
+            <label className="flex items-center gap-2 text-sm font-semibold ml-4" style={{ color: C.blueDeep }}>
+              <input type="checkbox" checked={!!m.isCommittee} onChange={(e) => set("isCommittee", e.target.checked)} />
+              Committee member
             </label>
           </div>
 
@@ -494,7 +410,7 @@ function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
               <select className={`${inputCls} flex-1`} style={inputStyle} value={roleLogDraft.role}
                 onChange={(e) => setRoleLogDraft((p) => ({ ...p, role: e.target.value }))}>
                 <option value="">Role…</option>
-                {[...new Set([...COMMON_ROLES, ...m.roles])].map((r) => <option key={r}>{r}</option>)}
+                {COMMON_ROLES.map((r) => <option key={r}>{r}</option>)}
               </select>
               <input type="date" className={`${inputCls} flex-1`} style={inputStyle}
                 value={roleLogDraft.date}
@@ -514,27 +430,19 @@ function MemberModal({ initial, onboardingTemplate, onSave, onClose }) {
             </div>
           </div>
 
-          <Field label="Development check-in">
-            <select className={inputCls} style={inputStyle} value={m.devFeeling}
-              onChange={(e) => set("devFeeling", e.target.value)}>
-              <option value="">— Not recorded —</option>
-              <option value="thriving">Thriving — confident and progressing well</option>
-              <option value="good">Good — steady, no blockers</option>
-              <option value="unsure">Unsure — needs guidance on next steps</option>
-              <option value="struggling">Struggling — needs active support</option>
-            </select>
-          </Field>
-          <Field label="Suggested next step">
-            <input className={inputCls} style={inputStyle} value={m.devNextStep}
-              onChange={(e) => set("devNextStep", e.target.value)}
-              placeholder="e.g. Schedule Icebreaker, pick a Pathways path…" />
-          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Main goal for joining Toastmasters">
+              <input className={inputCls} style={inputStyle} value={m.goal || ""}
+                onChange={(e) => set("goal", e.target.value)}
+                placeholder="e.g. Build public speaking confidence, improve leadership skills…" />
+            </Field>
+          </div>
 
           <div className="sm:col-span-2">
             <Field label="Notes">
               <textarea rows={3} className={inputCls} style={inputStyle} value={m.notes}
                 onChange={(e) => set("notes", e.target.value)}
-                placeholder="Mentoring pairings, goals, things to remember…" />
+                placeholder="Mentoring pairings, things to remember…" />
             </Field>
           </div>
         </div>
@@ -674,10 +582,55 @@ function PlanModal({ member, onSave, onClose }) {
   );
 }
 
+// ---------- Member role logger (used in member portal profile) ----------
+function MemberRoleLogger({ memberId, setData }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [role, setRole] = useState("");
+  const [date, setDate] = useState(today);
+
+  const log = () => {
+    const r = role.trim();
+    if (!r || !date) return;
+    setData((d) => ({
+      ...d,
+      members: d.members.map((m) => {
+        if (m.id !== memberId) return m;
+        const existing = (m.roleLog || []).find((e) => e.role === r);
+        const newLog = existing
+          ? (m.roleLog || []).map((e) => e.role === r ? { ...e, date } : e)
+          : [...(m.roleLog || []), { id: uid(), role: r, date }];
+        return { ...m, roleLog: newLog };
+      }),
+    }));
+    setRole("");
+    setDate(today);
+  };
+
+  return (
+    <div>
+      <div className="text-xs font-semibold mb-2" style={{ color: C.blueDeep }}>Log a role</div>
+      <datalist id="member-role-suggestions">
+        {COMMON_ROLES.map((r) => <option key={r} value={r} />)}
+      </datalist>
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="flex-1 min-w-36">
+          <input className={inputCls} list="member-role-suggestions" style={inputStyle}
+            value={role} onChange={(e) => setRole(e.target.value)}
+            placeholder="Role name…" />
+        </div>
+        <div>
+          <input type="date" className={inputCls} style={inputStyle}
+            value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        <Btn kind="primary" onClick={log} disabled={!role.trim() || !date}>Add</Btn>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Member profile card (read-only self-view) ----------
 function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers, setData, onboardingTemplate, rota, buddyGroups }) {
   const st = memberStatus(m);
-  const df = DEV_FEELING_MAP[m.devFeeling] || null;
   const daysAgo = daysSince(m.lastAttended);
   const myRecognitions = (recognitions || []).filter((r) => r.member === m.name);
   const paths = memberPaths(m);
@@ -726,7 +679,13 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
   return (
     <div className="space-y-4 max-w-2xl mx-auto">
       <div className="rounded-xl p-6" style={{ backgroundColor: C.blue, borderBottom: `5px solid ${C.maroon}` }}>
-        <div className="text-xs tracking-widest font-bold mb-1" style={{ color: C.gold }}>MEMBER PROFILE</div>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-xs tracking-widest font-bold" style={{ color: C.gold }}>MEMBER PROFILE</div>
+          {m.isCommittee && (
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+              style={{ backgroundColor: "rgba(255,255,255,0.15)", color: C.gold }}>★ Committee</span>
+          )}
+        </div>
         <h1 className="text-3xl text-white mb-1" style={{ fontFamily: SERIF }}>{m.name}</h1>
         {paths.length > 0 && (
           <div className="text-sm" style={{ color: "rgba(255,255,255,0.75)" }}>
@@ -734,6 +693,25 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
           </div>
         )}
       </div>
+
+      <Card className="p-4" accent={C.gold}>
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>CLUB LINKS</div>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <a href="https://toastmasterclub.org/view_meeting.php" target="_blank" rel="noopener noreferrer"
+            className="flex-1 text-center text-sm font-semibold px-4 py-2.5 rounded-lg"
+            style={{ backgroundColor: C.blue, color: "white", minWidth: 180 }}>
+            Sign up for meetings / request a speech ↗
+          </a>
+          <a href="https://apps.basecamp.toastmasters.org/dashboard" target="_blank" rel="noopener noreferrer"
+            className="flex-1 text-center text-sm font-semibold px-4 py-2.5 rounded-lg"
+            style={{ backgroundColor: C.maroon, color: "white", minWidth: 180 }}>
+            Mark speech as complete on Basecamp ↗
+          </a>
+        </div>
+        <p className="text-xs" style={{ color: MUTED }}>
+          After your speech or role, remember to mark it as complete on Basecamp.
+        </p>
+      </Card>
 
       <Card className="p-4" accent={st.fg}>
         <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>ATTENDANCE</div>
@@ -744,10 +722,6 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
             {daysAgo !== null && (
               <div className="text-xs mt-0.5" style={{ color: st.fg }}>{daysAgo} days ago</div>
             )}
-          </div>
-          <div>
-            <div className="text-xs mb-0.5" style={{ color: MUTED }}>Total meetings</div>
-            <div className="text-2xl font-bold" style={{ fontFamily: SERIF, color: C.blue }}>{m.totalMeetings || 0}</div>
           </div>
         </div>
         <Badge fg={st.fg} bg={st.bg}>{st.label}</Badge>
@@ -766,25 +740,7 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
             <div>
               <div className="text-xs mb-0.5" style={{ color: MUTED }}>Currently working on</div>
               <div className="font-bold" style={{ color: C.blueDeep }}>Level {m.level}</div>
-              {m.currentProject && <div className="text-sm mt-0.5" style={{ color: C.ink }}>{m.currentProject}</div>}
             </div>
-            {Object.keys(m.levelDates || {}).length > 0 && (
-              <div>
-                <div className="text-xs font-bold mb-1.5" style={{ color: MUTED }}>Levels completed</div>
-                <div className="flex flex-wrap gap-2">
-                  {[1, 2, 3, 4, 5].map((l) => {
-                    const date = (m.levelDates || {})[String(l)];
-                    if (!date) return null;
-                    return (
-                      <div key={l} className="text-xs px-2 py-1 rounded"
-                        style={{ backgroundColor: C.greenBg, color: C.green, border: `1px solid ${C.green}` }}>
-                        <span className="font-bold">Level {l}</span> — {fmtDate(date)}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </Card>
@@ -890,45 +846,51 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
         />
       )}
 
-      {(m.roles.length > 0 || (m.roleLog && m.roleLog.length > 0)) && (
-        <Card className="p-4" accent={C.blue}>
-          <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>ROLES COMPLETED</div>
-          {m.roles.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {m.roles.map((r) => (
-                <span key={r} className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                  style={{ backgroundColor: C.paper, color: C.blueDeep, border: `1px solid ${C.grayLine}` }}>
-                  {r}
-                </span>
-              ))}
-            </div>
-          )}
-          {m.roleLog && m.roleLog.length > 0 && (
-            <div>
-              <div className="text-xs font-bold mb-1" style={{ color: MUTED }}>History</div>
-              <div className="space-y-1">
-                {[...m.roleLog].sort((a, b) => b.date.localeCompare(a.date)).map((entry) => (
-                  <div key={entry.id} className="flex items-center gap-2 text-xs">
-                    <span className="font-semibold" style={{ color: C.blueDeep }}>{entry.role}</span>
-                    <span style={{ color: "#8A958F" }}>· {fmtDate(entry.date)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-      )}
+      <Card className="p-4" accent={C.blue}>
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>MY ROLES</div>
+        {/* Role history */}
+        {(m.roleLog && m.roleLog.length > 0) ? (
+          <div className="space-y-1 mb-4">
+            {[...m.roleLog].sort((a, b) => b.date.localeCompare(a.date)).map((entry) => {
+              const sixMonthsAgo = new Date();
+              sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+              const stale = entry.date < sixMonthsAgo.toISOString().slice(0, 10);
+              return (
+                <div key={entry.id} className="flex items-center gap-2 text-sm py-1"
+                  style={{ borderBottom: `1px solid ${C.grayLine}` }}>
+                  <span className="flex-1 font-semibold" style={{ color: stale ? C.amber : C.blueDeep }}>
+                    {entry.role}
+                    {stale && <span className="ml-1 text-xs font-normal" style={{ color: C.amber }}>· time to refresh!</span>}
+                  </span>
+                  <span className="text-xs shrink-0" style={{ color: stale ? C.amber : "#8A958F" }}>{fmtDate(entry.date)}</span>
+                  {setData && (
+                    <button className="text-xs shrink-0" style={{ color: MUTED }}
+                      onClick={() => setData((d) => ({
+                        ...d,
+                        members: d.members.map((mem) =>
+                          mem.id === m.id
+                            ? { ...mem, roleLog: (mem.roleLog || []).filter((e) => e.id !== entry.id) }
+                            : mem
+                        ),
+                      }))} title="Remove">✕</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs mb-4" style={{ color: "#8A958F" }}>No roles logged yet.</p>
+        )}
+        {/* Log a role */}
+        {setData && (
+          <MemberRoleLogger memberId={m.id} setData={setData} />
+        )}
+      </Card>
 
-      {(df || m.devNextStep) && (
-        <Card className="p-4" accent={df ? df.fg : C.blue}>
-          <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>DEVELOPMENT</div>
-          {df && <div className="mb-2"><Badge fg={df.fg} bg={df.bg}>{df.label}</Badge></div>}
-          {m.devNextStep && (
-            <div>
-              <div className="text-xs mb-0.5" style={{ color: MUTED }}>Suggested next step</div>
-              <div className="text-sm font-semibold" style={{ color: C.ink }}>{m.devNextStep}</div>
-            </div>
-          )}
+      {m.goal && (
+        <Card className="p-4" accent={C.blue}>
+          <div className="text-xs font-bold tracking-wide mb-2" style={{ color: C.blueDeep }}>MY TOASTMASTERS GOAL</div>
+          <p className="text-sm" style={{ color: C.ink }}>{m.goal}</p>
         </Card>
       )}
 
@@ -957,23 +919,18 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
           </p>
           <div className="space-y-3">
             {goals.map((g) => {
-              const completed = (allMembers || []).filter((mem) => {
-                const date = (mem.levelDates || {})[String(g.level)];
-                return date && date.startsWith(String(currentYear));
-              }).length;
+              const completed = g.completed || 0;
               const pct = g.target > 0 ? Math.min(100, Math.round((completed / g.target) * 100)) : 0;
               const hit = completed >= g.target;
               const isMyLevel = g.level === myLevel;
-              const alreadyDone = !!(m.levelDates || {})[String(g.level)];
               return (
                 <div key={g.id}>
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="font-semibold" style={{ color: isMyLevel ? C.maroon : C.blueDeep }}>
                       Level {g.level} — {completed}/{g.target} completed
-                      {isMyLevel && !alreadyDone && (
+                      {isMyLevel && (
                         <span className="ml-2 font-normal" style={{ color: C.maroon }}>← you're working on this!</span>
                       )}
-                      {alreadyDone && <span className="ml-2" style={{ color: C.green }}>✓ you've done this</span>}
                     </span>
                     <span style={{ color: hit ? C.green : C.ink }}>{pct}%</span>
                   </div>
@@ -987,6 +944,13 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
           </div>
         </Card>
       )}
+
+      {/* Committee badge */}
+      {m.isCommittee && (
+        <Card className="p-4" accent={C.blueDeep}>
+          <span className="text-xs font-bold tracking-wide" style={{ color: C.gold }}>★ COMMITTEE MEMBER</span>
+        </Card>
+      )}
     </div>
   );
 }
@@ -994,9 +958,9 @@ function MemberProfileCard({ member: m, recognitions, educationGoals, allMembers
 // ---------- Member self-registration form ----------
 function MemberSelfAdd({ name, onSave }) {
   const [m, setM] = useState({
-    id: uid(), name, paths: [], level: 1, currentProject: "",
+    id: uid(), name, paths: [], level: 1,
     lastAttended: "", totalMeetings: 0, roles: [], isNew: false,
-    onboardingStart: "", notes: "", roleLog: [], devFeeling: "", devNextStep: "", levelDates: {},
+    onboardingStart: "", notes: "", roleLog: [], goal: "", levelDates: {},
   });
   const set = (k, v) => setM((p) => ({ ...p, [k]: v }));
 
@@ -1028,11 +992,6 @@ function MemberSelfAdd({ name, onSave }) {
           {[1, 2, 3, 4, 5].map((l) => <option key={l} value={l}>Level {l}</option>)}
         </select>
       </Field>
-      <Field label="Current project (optional)">
-        <input className={inputCls} style={inputStyle} value={m.currentProject}
-          onChange={(e) => set("currentProject", e.target.value)}
-          placeholder="e.g. Researching and Presenting" />
-      </Field>
       <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
         <input type="checkbox" checked={m.isNew} onChange={(e) => set("isNew", e.target.checked)} />
         I'm a new member
@@ -1049,6 +1008,11 @@ function MemberSelfAdd({ name, onSave }) {
             onChange={(e) => set("onboardingStart", e.target.value)} />
         </Field>
       )}
+      <Field label="Main goal for joining Toastmasters (optional)">
+        <input className={inputCls} style={inputStyle} value={m.goal}
+          onChange={(e) => set("goal", e.target.value)}
+          placeholder="e.g. Build confidence speaking in public" />
+      </Field>
       <Btn kind="maroon" className="w-full" onClick={() => onSave(m)}>Save my info</Btn>
     </div>
   );
@@ -1058,11 +1022,15 @@ function MemberSelfAdd({ name, onSave }) {
 function MemberPortalView({ data, setData, onSwitchToAdmin }) {
   const [nameInput, setNameInput] = useState("");
   const [searched, setSearched] = useState(false);
-
   const trimmed = nameInput.trim();
   const member = (data && trimmed)
     ? data.members.find((m) => m.name.toLowerCase() === trimmed.toLowerCase()) || null
     : null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const upcomingEvents = (data?.events || [])
+    .filter((ev) => ev.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date));
 
 
   const handleSearch = (e) => {
@@ -1124,14 +1092,40 @@ function MemberPortalView({ data, setData, onSwitchToAdmin }) {
             </form>
           </div>
         ) : member ? (
-          <MemberProfileCard
-            member={member}
-            recognitions={data?.recognitions || []}
-            educationGoals={data?.educationGoals || []}
-            allMembers={data?.members || []}
-            setData={setData}
-            onboardingTemplate={data?.onboardingTemplate}
-          />
+          <>
+            {/* Upcoming events panel */}
+            {upcomingEvents.length > 0 && (
+              <div className="mb-4 rounded-xl overflow-hidden" style={{ border: `1px solid ${C.gold}` }}>
+                <div className="px-4 py-2" style={{ backgroundColor: C.gold }}>
+                  <span className="text-xs font-bold tracking-wide" style={{ color: "white" }}>UPCOMING IN THE CLUB</span>
+                </div>
+                <div style={{ backgroundColor: "#FFFDF5" }}>
+                  {upcomingEvents.map((ev, i) => (
+                    <div key={ev.id} className="px-4 py-3 flex items-start gap-4"
+                      style={{ borderTop: i > 0 ? `1px solid ${C.grayLine}` : "none" }}>
+                      <div className="shrink-0 text-xs font-semibold pt-0.5 w-24" style={{ color: C.maroon }}>
+                        {fmtDate(ev.date)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm" style={{ color: C.blueDeep }}>{ev.title}</div>
+                        {ev.detail && <p className="text-xs mt-0.5" style={{ color: MUTED }}>{ev.detail}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <MemberProfileCard
+              member={member}
+              recognitions={data?.recognitions || []}
+              educationGoals={data?.educationGoals || []}
+              allMembers={data?.members || []}
+              setData={setData}
+              onboardingTemplate={data?.onboardingTemplate}
+              rota={data?.meetingRota || []}
+              buddyGroups={data?.buddyGroups || []}
+            />
+          </>
         ) : (
           <div className="max-w-sm mx-auto mt-8">
             <Card className="p-5" accent={C.maroon}>
@@ -1155,12 +1149,23 @@ function MemberPortalView({ data, setData, onSwitchToAdmin }) {
 // ---------- Compact multi-select cells for BulkEditModal ----------
 function PathsCell({ value, onChange }) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
+  const triggerRef = useRef(null);
   const toggle = (p) =>
     onChange(value.includes(p) ? value.filter((x) => x !== p) : [...value, p]);
+  const handleOpen = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setDropUp(window.innerHeight - rect.bottom < 220);
+    }
+    setOpen((v) => !v);
+  };
+  const dropPos = dropUp
+    ? { bottom: "100%", top: "auto", marginBottom: 2 }
+    : { top: "100%", bottom: "auto", marginTop: 2 };
   return (
-    <div style={{ position: "relative" }}>
-      <div
-        onClick={() => setOpen((v) => !v)}
+    <div style={{ position: "relative" }} ref={triggerRef}>
+      <div onClick={handleOpen}
         className="cursor-pointer rounded border px-1.5 py-1 flex flex-wrap gap-0.5 items-center"
         style={{ minHeight: "28px", borderColor: C.grayLine, backgroundColor: "white" }}>
         {value.length === 0
@@ -1175,9 +1180,9 @@ function PathsCell({ value, onChange }) {
       {open && (
         <>
           <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
-          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100, backgroundColor: "white",
+          <div style={{ position: "absolute", left: 0, zIndex: 100, backgroundColor: "white",
             border: `1px solid ${C.grayLine}`, borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-            minWidth: 220, padding: "6px 0" }}>
+            minWidth: 220, padding: "6px 0", ...dropPos }}>
             {PATHS.map((p) => (
               <label key={p} className="flex items-center gap-2 px-3 py-1 cursor-pointer text-xs"
                 style={{ color: C.ink }}
@@ -1197,13 +1202,24 @@ function PathsCell({ value, onChange }) {
 
 function BuddyGroupCell({ value, groups, onChange }) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
+  const triggerRef = useRef(null);
   const toggle = (id) =>
     onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
   const selectedNames = groups.filter((g) => value.includes(g.id)).map((g) => g.name);
+  const handleOpen = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setDropUp(window.innerHeight - rect.bottom < 160);
+    }
+    setOpen((v) => !v);
+  };
+  const dropPos = dropUp
+    ? { bottom: "100%", top: "auto", marginBottom: 2 }
+    : { top: "100%", bottom: "auto", marginTop: 2 };
   return (
-    <div style={{ position: "relative" }}>
-      <div
-        onClick={() => setOpen((v) => !v)}
+    <div style={{ position: "relative" }} ref={triggerRef}>
+      <div onClick={handleOpen}
         className="cursor-pointer rounded border px-1.5 py-1 flex flex-wrap gap-0.5 items-center"
         style={{ minHeight: "28px", borderColor: C.grayLine, backgroundColor: "white" }}>
         {selectedNames.length === 0
@@ -1218,9 +1234,9 @@ function BuddyGroupCell({ value, groups, onChange }) {
       {open && (
         <>
           <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={() => setOpen(false)} />
-          <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100, backgroundColor: "white",
+          <div style={{ position: "absolute", left: 0, zIndex: 100, backgroundColor: "white",
             border: `1px solid ${C.grayLine}`, borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
-            minWidth: 180, padding: "6px 0" }}>
+            minWidth: 180, padding: "6px 0", ...dropPos }}>
             {groups.length === 0
               ? <p className="text-xs px-3 py-1.5" style={{ color: MUTED }}>No groups created yet.</p>
               : groups.map((g) => (
@@ -1266,7 +1282,7 @@ function BulkEditModal({ data, onSave, onClose }) {
     setRows((prev) => [
       ...prev,
       {
-        id: uid(), name: "", paths: [], level: 1, currentProject: "",
+        id: uid(), name: "", paths: [], level: 1,
         lastAttended: "", totalMeetings: 0, roles: [], isNew: false,
         onboardingStart: "", notes: "", roleLog: [], devFeeling: "", devNextStep: "", levelDates: {},
         _buddyGroupIds: [],
@@ -1328,13 +1344,10 @@ function BulkEditModal({ data, onSave, onClose }) {
               <th className={th} style={{ color: C.gold, minWidth: "160px" }}>Name *</th>
               <th className={th} style={{ color: C.gold, minWidth: "220px" }}>Pathways path(s)</th>
               <th className={th} style={{ color: C.gold, minWidth: "70px" }}>Level</th>
-              <th className={th} style={{ color: C.gold, minWidth: "170px" }}>Current project</th>
               <th className={th} style={{ color: C.gold, minWidth: "130px" }}>Last attended</th>
-              <th className={th} style={{ color: C.gold, minWidth: "80px" }}>Meetings</th>
               <th className={th} style={{ color: C.gold, minWidth: "55px", textAlign: "center" }}>New?</th>
               <th className={th} style={{ color: C.gold, minWidth: "130px" }}>100-day plan start</th>
-              <th className={th} style={{ color: C.gold, minWidth: "120px" }}>Dev feeling</th>
-              <th className={th} style={{ color: C.gold, minWidth: "170px" }}>Next step</th>
+              <th className={th} style={{ color: C.gold, minWidth: "200px" }}>Toastmasters goal</th>
               <th className={th} style={{ color: C.gold, minWidth: "170px" }}>Notes</th>
               <th className={th} style={{ color: C.gold, minWidth: "160px" }}>Buddy group(s)</th>
               <th className={th} style={{ color: C.gold, minWidth: "36px" }}></th>
@@ -1343,7 +1356,7 @@ function BulkEditModal({ data, onSave, onClose }) {
           <tbody>
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-4 py-10 text-center" style={{ color: MUTED }}>
+                <td colSpan={12} className="px-4 py-10 text-center" style={{ color: MUTED }}>
                   {rows.length === 0
                     ? "No members yet — click '+ Add member' to start."
                     : "No members match your search."}
@@ -1374,18 +1387,8 @@ function BulkEditModal({ data, onSave, onClose }) {
                   </select>
                 </td>
                 <td className={td}>
-                  <input className={cell} style={inputStyle} value={r.currentProject || ""}
-                    onChange={(e) => update(r.id, "currentProject", e.target.value)}
-                    placeholder="Project name" />
-                </td>
-                <td className={td}>
                   <input type="date" className={cell} style={inputStyle} value={r.lastAttended || ""}
                     onChange={(e) => update(r.id, "lastAttended", e.target.value)} />
-                </td>
-                <td className={td}>
-                  <input type="number" min="0" className={cell} style={inputStyle}
-                    value={r.totalMeetings ?? 0}
-                    onChange={(e) => update(r.id, "totalMeetings", Math.max(0, Number(e.target.value)))} />
                 </td>
                 <td className={td} style={{ textAlign: "center" }}>
                   <input type="checkbox" checked={!!r.isNew}
@@ -1396,19 +1399,9 @@ function BulkEditModal({ data, onSave, onClose }) {
                     onChange={(e) => update(r.id, "onboardingStart", e.target.value)} />
                 </td>
                 <td className={td}>
-                  <select className={cell} style={inputStyle} value={r.devFeeling || ""}
-                    onChange={(e) => update(r.id, "devFeeling", e.target.value)}>
-                    <option value="">—</option>
-                    <option value="thriving">Thriving</option>
-                    <option value="good">Good</option>
-                    <option value="unsure">Unsure</option>
-                    <option value="struggling">Struggling</option>
-                  </select>
-                </td>
-                <td className={td}>
-                  <input className={cell} style={inputStyle} value={r.devNextStep || ""}
-                    onChange={(e) => update(r.id, "devNextStep", e.target.value)}
-                    placeholder="Suggested next step" />
+                  <input className={cell} style={inputStyle} value={r.goal || ""}
+                    onChange={(e) => update(r.id, "goal", e.target.value)}
+                    placeholder="Main Toastmasters goal…" />
                 </td>
                 <td className={td}>
                   <input className={cell} style={inputStyle} value={r.notes || ""}
@@ -1557,13 +1550,15 @@ function BuddyGroupsAdmin({ data, setData }) {
 
 // ---------- Views ----------
 function HomeView({ data, go }) {
+  const today = new Date().toISOString().slice(0, 10);
   const dormant = data.members.filter((m) => memberStatus(m).key === "dormant");
   const newbies = data.members.filter((m) => m.onboardingStart);
   const activeCycle = data.cycles.find((c) => c.id === currentCycleId(data.cycles));
   const unposted = data.recognitions.filter((r) => !r.posted);
-  const openActions = (activeCycle?.actions || []).filter((a) => !a.done);
-  const latestWeek = (data.weeks || [])[0];
-  const openWeekTasks = latestWeek ? latestWeek.tasks.filter((t) => !t.done) : [];
+  const upcomingMeetings = (data.meetingRota || [])
+    .filter((r) => r.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 5);
 
   const stats = [
     { label: "Active members", value: data.members.length, onClick: () => go("members") },
@@ -1609,45 +1604,44 @@ function HomeView({ data, go }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-4" accent={C.gold}>
-          <h3 className="font-bold text-sm mb-1" style={{ color: C.blueDeep }}>Current theme cycle</h3>
+          <h3 className="font-bold text-sm mb-1" style={{ color: C.blueDeep }}>Current skill cycle</h3>
           {activeCycle ? (
             <>
               <div className="text-xl" style={{ fontFamily: SERIF, color: C.maroon }}>
                 {activeCycle.name} <span className="text-sm" style={{ color: "#5B6B73" }}>({activeCycle.span})</span>
               </div>
               <div className="text-xs mt-2" style={{ color: "#5B6B73" }}>
-                {activeCycle.tips.filter((t) => !t.posted).length} tip(s) still to post ·{" "}
-                {openActions.length} open action(s)
+                {activeCycle.tips.filter((t) => !t.posted).length} tip(s) still to post
               </div>
               <div className="mt-3"><Btn kind="ghost" onClick={() => go("cycles")}>Open cycle</Btn></div>
             </>
           ) : <p className="text-sm" style={{ color: "#5B6B73" }}>No cycle matches this month.</p>}
         </Card>
 
-        <Card className="p-4" accent={openActions.length + openWeekTasks.length ? C.amber : C.green}>
-          <h3 className="font-bold text-sm mb-2" style={{ color: C.blueDeep }}>Upcoming actions & reminders</h3>
-          {openActions.length === 0 && openWeekTasks.length === 0 ? (
-            <p className="text-sm" style={{ color: C.green }}>All clear — no open actions in the current cycle or week.</p>
+        <Card className="p-4" accent={C.blue}>
+          <h3 className="font-bold text-sm mb-3" style={{ color: C.blueDeep }}>Upcoming Toastmasters</h3>
+          {upcomingMeetings.length === 0 ? (
+            <p className="text-sm" style={{ color: MUTED }}>No upcoming meetings in the rota yet.</p>
           ) : (
-            <ul className="space-y-1.5">
-              {openWeekTasks.map((t) => (
-                <li key={t.id} className="text-sm flex gap-2" style={{ color: C.ink }}>
-                  <span style={{ color: C.gold }}>◆</span>{t.text}
-                  <button className="text-xs underline ml-1" style={{ color: C.blue }} onClick={() => go("weekly")}>
-                    {latestWeek.label}
-                  </button>
-                </li>
-              ))}
-              {openActions.slice(0, 5).map((a) => (
-                <li key={a.id} className="text-sm flex gap-2" style={{ color: C.ink }}>
-                  <span style={{ color: C.maroon }}>▸</span>{a.text}
-                </li>
-              ))}
-              {openActions.length > 5 && (
-                <li className="text-xs" style={{ color: "#5B6B73" }}>…and {openActions.length - 5} more in the cycle view.</li>
-              )}
-            </ul>
+            <div className="space-y-2">
+              {upcomingMeetings.map((mtg, i) => {
+                const tm = (mtg.roles || {}).toastmaster;
+                return (
+                  <div key={mtg.id} className="flex items-center gap-3 py-1.5"
+                    style={{ borderBottom: i < upcomingMeetings.length - 1 ? `1px solid ${C.grayLine}` : "none" }}>
+                    <div className="shrink-0 text-center" style={{ minWidth: 56 }}>
+                      <div className="text-xs font-bold" style={{ color: C.blueDeep }}>{fmtDate(mtg.date)}</div>
+                    </div>
+                    <div className="flex-1 text-sm font-semibold" style={{ color: tm ? C.maroon : MUTED }}>
+                      {tm || <span className="italic font-normal">TBC</span>}
+                    </div>
+                    {i === 0 && <Badge fg={C.blueDeep} bg={C.gold}>Next</Badge>}
+                  </div>
+                );
+              })}
+            </div>
           )}
+          <div className="mt-3"><Btn kind="ghost" onClick={() => go("rota")}>Manage rota</Btn></div>
         </Card>
 
         {dormant.length > 0 && (
@@ -1678,6 +1672,7 @@ function MembersView({ data, setData, initialFilter }) {
       .filter((m) => {
         const st = memberStatus(m).key;
         if (filter === "dormant" && st !== "dormant") return false;
+        if (filter === "nudge" && st !== "nudge") return false;
         if (filter === "active" && st === "dormant") return false;
         if (filter === "new" && !m.isNew) return false;
         if (filter === "nopath" && memberPaths(m).length > 0) return false;
@@ -1707,12 +1702,79 @@ function MembersView({ data, setData, initialFilter }) {
   };
 
   const filters = [
-    ["all", "All"], ["active", "Active"], ["dormant", "Dormant"], ["new", "New members"], ["nopath", "No path selected"],
+    ["all", "All"], ["active", "Active"], ["nudge", "Needs nudge"], ["dormant", "Dormant"], ["new", "New members"], ["nopath", "No path selected"],
   ];
 
   return (
     <div>
       <SectionTitle sub="Pathways progress, attendance, and roles for every member.">Members</SectionTitle>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4 px-4 py-3 rounded-lg"
+        style={{ backgroundColor: C.paper, border: `1px solid ${C.grayLine}` }}>
+        <span className="text-xs font-semibold" style={{ color: C.blueDeep }}>Quick links</span>
+        <a href="https://toastmasterclub.org/view_meeting.php" target="_blank" rel="noopener noreferrer"
+          className="text-xs px-3 py-1.5 rounded-full font-semibold"
+          style={{ backgroundColor: C.blue, color: "white" }}>
+          Sign up for meetings / request a speech ↗
+        </a>
+        <a href="https://apps.basecamp.toastmasters.org/dashboard" target="_blank" rel="noopener noreferrer"
+          className="text-xs px-3 py-1.5 rounded-full font-semibold"
+          style={{ backgroundColor: C.maroon, color: "white" }}>
+          Mark speech as complete on Basecamp ↗
+        </a>
+        <span className="text-xs ml-auto" style={{ color: MUTED }}>
+          After your speech or role, remember to mark it as complete on Basecamp.
+        </span>
+      </div>
+
+      {(() => {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const nextMtg = (data.meetingRota || [])
+          .filter((r) => r.date >= todayStr)
+          .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+        const upcomingEvts = (data.events || [])
+          .filter((e) => e.date >= todayStr)
+          .sort((a, b) => a.date.localeCompare(b.date));
+        if (!nextMtg && upcomingEvts.length === 0) return null;
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            {nextMtg && (
+              <Card className="p-4" accent={C.gold} style={{ backgroundColor: "#FBF5DA" }}>
+                <div className="text-xs font-bold tracking-wide mb-1" style={{ color: C.blueDeep }}>NEXT MEETING</div>
+                <div className="text-base font-bold mb-1" style={{ color: C.maroon, fontFamily: SERIF }}>
+                  {fmtDate(nextMtg.date)}
+                </div>
+                <div className="text-xs" style={{ color: C.blueDeep }}>
+                  Toastmaster of the Day:{" "}
+                  <span className="font-bold" style={{ color: (nextMtg.roles || {}).toastmaster ? C.ink : MUTED }}>
+                    {(nextMtg.roles || {}).toastmaster || "TBC"}
+                  </span>
+                </div>
+              </Card>
+            )}
+            {upcomingEvts.length > 0 && (
+              <Card className="p-0 overflow-hidden" style={{ gridColumn: nextMtg ? undefined : "1 / -1" }}>
+                <div className="px-4 py-2" style={{ backgroundColor: C.blueDeep }}>
+                  <span className="text-xs font-bold tracking-wide" style={{ color: "white" }}>UPCOMING IN THE CLUB</span>
+                </div>
+                <div className="divide-y" style={{ borderColor: C.grayLine }}>
+                  {upcomingEvts.map((ev) => (
+                    <div key={ev.id} className="px-4 py-3 flex items-start gap-4">
+                      <div className="shrink-0 text-xs font-semibold pt-0.5 w-24" style={{ color: C.maroon }}>
+                        {fmtDate(ev.date)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm" style={{ color: C.blueDeep }}>{ev.title}</div>
+                        {ev.detail && <p className="text-xs mt-0.5" style={{ color: MUTED }}>{ev.detail}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {filters.map(([k, label]) => (
@@ -1744,7 +1806,6 @@ function MembersView({ data, setData, initialFilter }) {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {filtered.map((m) => {
             const st = memberStatus(m);
-            const df = DEV_FEELING_MAP[m.devFeeling] || null;
             const daysAgo = daysSince(m.lastAttended);
             return (
               <Card key={m.id} className="p-4 flex flex-col gap-2"
@@ -1761,29 +1822,19 @@ function MembersView({ data, setData, initialFilter }) {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
+                    {m.isCommittee && (
+                      <Badge fg={C.gold} bg={C.blueDeep}>★ Committee</Badge>
+                    )}
                     <Badge fg={st.fg} bg={st.bg}>{st.key === "dormant" ? "● DORMANT" : st.label.split(" — ")[0]}</Badge>
                     {memberPaths(m).length === 0 && <Badge fg={C.amber} bg={C.amberBg}>No path</Badge>}
                   </div>
                 </div>
 
                 <div className="text-xs space-y-1" style={{ color: C.ink }}>
-                  <div><span className="font-semibold">Project:</span> {m.currentProject || "—"}</div>
                   <div><span className="font-semibold">Last attended:</span> {fmtDate(m.lastAttended)}
                     {st.key === "dormant" && daysAgo !== null && <span style={{ color: C.red }}> ({daysAgo} days ago)</span>}
                   </div>
-                  <div><span className="font-semibold">Meetings:</span> {m.totalMeetings}</div>
                 </div>
-
-                {m.roles.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {m.roles.map((r) => (
-                      <span key={r} className="px-1.5 py-0.5 rounded text-xs"
-                        style={{ backgroundColor: C.paper, color: C.blueDeep, border: `1px solid ${C.grayLine}` }}>
-                        {r}
-                      </span>
-                    ))}
-                  </div>
-                )}
 
                 {m.roleLog && m.roleLog.length > 0 && (
                   <div className="text-xs space-y-0.5">
@@ -1804,16 +1855,27 @@ function MembersView({ data, setData, initialFilter }) {
                   </div>
                 )}
 
-                {df && (
-                  <div className={CLS_DEV_ROW}>
-                    <span style={{ color: MUTED }}>Development:</span>
-                    <Badge fg={df.fg} bg={df.bg}>{df.label}</Badge>
-                    {m.devNextStep && <span style={{ color: MUTED }}>{'-> '}{m.devNextStep}</span>}
+                {m.goal && (
+                  <div className="text-xs italic" style={{ color: MUTED }}>
+                    Goal: {m.goal}
                   </div>
                 )}
                 {m.notes && <p className={CLS_NOTE_P} style={{ color: MUTED }}>”{m.notes}”</p>}
 
-                <div className="flex gap-2 mt-auto pt-2">
+                <div className="flex gap-2 mt-auto pt-2 flex-wrap">
+                  <button
+                    className="text-xs px-2 py-1 rounded-full font-semibold border"
+                    style={{
+                      backgroundColor: m.isCommittee ? C.blueDeep : "transparent",
+                      color: m.isCommittee ? C.gold : MUTED,
+                      borderColor: m.isCommittee ? C.blueDeep : C.grayLine,
+                    }}
+                    onClick={() => setData((d) => ({
+                      ...d,
+                      members: d.members.map((x) => x.id === m.id ? { ...x, isCommittee: !x.isCommittee } : x),
+                    }))}>
+                    {m.isCommittee ? "★ Committee" : "○ Committee"}
+                  </button>
                   <Btn kind="ghost" onClick={() => setEditing(m)}>Edit</Btn>
                   <Btn kind="danger" onClick={() => deleteMember(m.id)}>Remove</Btn>
                 </div>
@@ -1958,8 +2020,8 @@ function CyclesView({ data, setData }) {
 
   return (
     <div>
-      <SectionTitle sub="Six-week themes across the Toastmasters year. The active cycle is highlighted in gold.">
-        Theme Cycles
+      <SectionTitle sub="Six-week skill cycles across the Toastmasters year. The active cycle is highlighted in gold.">
+        Skill Cycles
       </SectionTitle>
       <div className="space-y-3">
         {data.cycles.map((c) => {
@@ -1983,8 +2045,24 @@ function CyclesView({ data, setData }) {
               </button>
 
               {isOpen && (
-                <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-3 gap-4"
+                <div className="px-4 pb-4"
                   style={{ borderTop: `1px solid ${C.grayLine}` }}>
+                  {/* Editable cycle name + span */}
+                  <div className="flex flex-wrap gap-3 pt-3 pb-3 mb-1" style={{ borderBottom: `1px dashed ${C.grayLine}` }}>
+                    <label className="flex items-center gap-2 text-xs font-semibold" style={{ color: C.blueDeep }}>
+                      Theme name:
+                      <input className={inputCls} style={{ ...inputStyle, maxWidth: 180 }}
+                        value={c.name}
+                        onChange={(e) => setCycle(c.id, (cy) => ({ ...cy, name: e.target.value }))} />
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-semibold" style={{ color: C.blueDeep }}>
+                      Period:
+                      <input className={inputCls} style={{ ...inputStyle, maxWidth: 120 }}
+                        value={c.span}
+                        onChange={(e) => setCycle(c.id, (cy) => ({ ...cy, span: e.target.value }))} />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   {/* Tips & articles */}
                   <div className="pt-3">
                     <h4 className="text-xs font-bold tracking-wide mb-2" style={{ color: C.blueDeep }}>TIPS & ARTICLES TO POST</h4>
@@ -2072,6 +2150,7 @@ function CyclesView({ data, setData }) {
                       }}>Add</Btn>
                     </div>
                   </div>
+                  </div>
                 </div>
               )}
             </Card>
@@ -2084,15 +2163,19 @@ function CyclesView({ data, setData }) {
 
 function RecognitionView({ data, setData }) {
   const [form, setForm] = useState({ type: RECOGNITION_TYPES[0], member: "", detail: "" });
+  const [guestName, setGuestName] = useState("");
   const unposted = data.recognitions.filter((r) => !r.posted);
 
+  const effectiveMember = form.member === "__guest__" ? guestName.trim() : form.member.trim();
+
   const add = () => {
-    if (!form.member.trim()) return;
+    if (!effectiveMember) return;
     setData((d) => ({
       ...d,
-      recognitions: [...d.recognitions, { id: uid(), ...form, member: form.member.trim(), posted: false }],
+      recognitions: [...d.recognitions, { id: uid(), ...form, member: effectiveMember, posted: false }],
     }));
     setForm({ type: RECOGNITION_TYPES[0], member: "", detail: "" });
+    setGuestName("");
   };
 
   const togglePosted = (id) =>
@@ -2114,8 +2197,8 @@ function RecognitionView({ data, setData }) {
       const detail = r.detail ? `: ${r.detail}` : "";
       return `${i + 1}. ${r.member} – ${r.type}${detail}`;
     }).join("\n");
-    const prompt = `You are writing Game Changers recognition posts for a Toastmasters club. Write an enthusiastic, warm 2–3 sentence recognition message for each achievement below. Address the member by first name and keep the tone celebratory and encouraging — suitable for posting in a club group chat.\n\n${items}\n\nFormat each as a separate post labelled with the member's name.`;
-    navigator.clipboard.writeText(prompt).then(() => alert("Prompt copied to clipboard — paste it into your favourite LLM!"));
+    const prompt = `## Task\nWrite Game Changers recognition posts for a Toastmasters club meeting.\n\n## Instructions\n- Write one short, enthusiastic post per achievement (2–3 sentences each)\n- Address each member by first name\n- Keep the tone warm, celebratory, and encouraging — suitable for a club group chat\n- Use plain text only (no markdown, no bullet points, no headers in the output)\n- Separate each post with a blank line\n- Label each post with the member's name in bold at the top\n\n## Achievements to recognise\n${items}\n\n## Output format\nReturn only the finished posts, ready to copy-paste into the group chat. Do not include any explanation or preamble.`;
+    navigator.clipboard.writeText(prompt).then(() => alert("Prompt copied — paste it into Microsoft Copilot to generate your recognition posts!"));
   };
 
   const needsDetail = form.type === "First time in a role" || form.type === "Pathways level completion";
@@ -2134,15 +2217,15 @@ function RecognitionView({ data, setData }) {
             {unposted.length} recognition{unposted.length > 1 ? "s" : ""} not yet posted to Game Changers.
           </span>
           <Btn kind="ghost" className="ml-auto" onClick={copyLLMPrompt}
-            title="Copy a prompt you can paste into an LLM to generate recognition messages">
-            ✨ Generate recognition prompt
+            title="Copy a prompt you can paste into Microsoft Copilot to generate recognition posts">
+            ✨ Copy Copilot prompt
           </Btn>
         </div>
       )}
 
       <Card className="p-4 mb-5" accent={C.maroon}>
         <h3 className="text-sm font-bold mb-3" style={{ color: C.blueDeep }}>Add recognition</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
           <Field label="Type">
             <select className={inputCls} style={inputStyle} value={form.type}
               onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}>
@@ -2162,17 +2245,21 @@ function RecognitionView({ data, setData }) {
                 onChange={(e) => setForm((f) => ({ ...f, member: e.target.value }))} placeholder="Member name" />
             )}
           </Field>
-          <Field label={needsDetail ? (form.type === "First time in a role" ? "Which role?" : "Which level / path?") : "Detail (optional)"}>
-            <input className={inputCls} style={inputStyle} value={form.detail}
-              onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
-              placeholder={form.type === "First time in a role" ? "e.g. Grammarian" : "e.g. Level 2 — Presentation Mastery"} />
-          </Field>
         </div>
         {form.member === "__guest__" && (
-          <input className={`${inputCls} mt-2 max-w-xs`} style={inputStyle} placeholder="Name"
-            onChange={(e) => setForm((f) => ({ ...f, member: e.target.value }))} />
+          <div className="mb-3">
+            <input className={`${inputCls} max-w-xs`} style={inputStyle} placeholder="Guest / other name"
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)} />
+          </div>
         )}
-        <div className="mt-3"><Btn kind="maroon" onClick={add} disabled={!form.member.trim() || form.member === "__guest__"}>Add recognition</Btn></div>
+        <Field label={needsDetail ? (form.type === "First time in a role" ? "Which role?" : "Which level / path?") : "Detail (optional)"}>
+          <textarea className={inputCls} style={{ ...inputStyle, width: "100%", minHeight: 72, resize: "vertical" }}
+            value={form.detail}
+            onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
+            placeholder={form.type === "First time in a role" ? "e.g. General Evaluator" :form.type === "Contest winner" ? "e.g. International Speech Contest — 1st place" : "Add any extra detail…"} />
+        </Field>
+        <div className="mt-3"><Btn kind="maroon" onClick={add} disabled={!effectiveMember}>Add recognition</Btn></div>
       </Card>
 
       <div className="flex items-center justify-between mb-3">
@@ -2217,567 +2304,275 @@ function RecognitionView({ data, setData }) {
   );
 }
 
-// ---------- Weekly meeting checklist ----------
-function WeeklyView({ data, setData }) {
-  const weeks = data.weeks || [];
-  const [drafts, setDrafts] = useState({}); // {weekId: text}
-
-  const addWeek = () => {
-    const today = new Date();
-    const label = `Week of ${today.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`;
-    setData((d) => ({
-      ...d,
-      weeks: [
-        {
-          id: uid(),
-          label,
-          created: today.toISOString().slice(0, 10),
-          tasks: DEFAULT_WEEK_TASKS.map((t) => ({ id: uid(), text: t, done: false })),
-        },
-        ...(d.weeks || []),
-      ],
-    }));
-  };
-
-  const setWeek = (id, fn) =>
-    setData((d) => ({ ...d, weeks: d.weeks.map((w) => (w.id === id ? fn(w) : w)) }));
-
-  const removeWeek = (id) => {
-    if (window.confirm("Delete this week and its checklist?")) {
-      setData((d) => ({ ...d, weeks: d.weeks.filter((w) => w.id !== id) }));
-    }
-  };
-
-  return (
-    <div>
-      <SectionTitle sub="One checklist per meeting week: volunteers, notes, and Game Changers — nothing slips.">
-        Weekly Checklist
-      </SectionTitle>
-
-      <div className="mb-4">
-        <Btn kind="maroon" onClick={addWeek}>+ Start a new week</Btn>
-      </div>
-
-      {weeks.length === 0 ? (
-        <Card className="p-8 text-center">
-          <p className="text-sm" style={{ color: "#5B6B73" }}>
-            No weeks yet. Start a new week and it comes pre-loaded with your three standing tasks:
-            role volunteers, meeting notes, and Game Changers recognition.
-          </p>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {weeks.map((w, i) => {
-            const open = w.tasks.filter((t) => !t.done).length;
-            const isCurrent = i === 0;
-            return (
-              <Card key={w.id} className="p-4" accent={open === 0 ? C.green : isCurrent ? C.gold : C.amber}>
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                  <input
-                    className="font-bold text-sm bg-transparent focus:outline-none focus:ring-2 rounded px-1"
-                    style={{ color: C.blueDeep, fontFamily: SERIF, border: "1px solid transparent" }}
-                    value={w.label}
-                    onChange={(e) => setWeek(w.id, (wk) => ({ ...wk, label: e.target.value }))}
-                  />
-                  {isCurrent && <Badge fg={C.blueDeep} bg={C.gold}>CURRENT</Badge>}
-                  {open === 0
-                    ? <Badge fg={C.green} bg={C.greenBg}>✓ All done</Badge>
-                    : <Badge fg={C.amber} bg={C.amberBg}>{open} open</Badge>}
-                  <button className="ml-auto text-xs" style={{ color: "#8A958F" }}
-                    onClick={() => removeWeek(w.id)}>Delete week</button>
-                </div>
-                <ul className="space-y-1.5 mb-2">
-                  {w.tasks.map((t) => (
-                    <li key={t.id} className="flex items-start gap-2 text-sm">
-                      <input type="checkbox" checked={t.done} className="mt-0.5"
-                        onChange={() => setWeek(w.id, (wk) => ({
-                          ...wk, tasks: wk.tasks.map((x) => x.id === t.id ? { ...x, done: !x.done } : x),
-                        }))} />
-                      <span style={{
-                        color: t.done ? "#8A958F" : C.ink,
-                        textDecoration: t.done ? "line-through" : "none",
-                      }}>{t.text}</span>
-                      <button className="ml-auto text-xs" style={{ color: "#8A958F" }}
-                        onClick={() => setWeek(w.id, (wk) => ({ ...wk, tasks: wk.tasks.filter((x) => x.id !== t.id) }))}
-                        aria-label="Delete task">✕</button>
-                    </li>
-                  ))}
-                </ul>
-                <div className="flex gap-2">
-                  <input className={inputCls} style={inputStyle} placeholder="Add a task for this week…"
-                    value={drafts[w.id] || ""}
-                    onChange={(e) => setDrafts((p) => ({ ...p, [w.id]: e.target.value }))}
-                    onKeyDown={(e) => {
-                      const text = (drafts[w.id] || "").trim();
-                      if (e.key === "Enter" && text) {
-                        setWeek(w.id, (wk) => ({ ...wk, tasks: [...wk.tasks, { id: uid(), text, done: false }] }));
-                        setDrafts((p) => ({ ...p, [w.id]: "" }));
-                      }
-                    }} />
-                  <Btn kind="ghost" onClick={() => {
-                    const text = (drafts[w.id] || "").trim();
-                    if (text) {
-                      setWeek(w.id, (wk) => ({ ...wk, tasks: [...wk.tasks, { id: uid(), text, done: false }] }));
-                      setDrafts((p) => ({ ...p, [w.id]: "" }));
-                    }
-                  }}>Add</Btn>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------- Education Goals + DTM tracker ----------
+// ---------- Education Goals ----------
 function DTMView({ data, setData }) {
   const currentYear = new Date().getFullYear();
-  const [goalYear, setGoalYear] = useState(currentYear);
-  const [showDTM, setShowDTM] = useState(false);
+  const [newLevel, setNewLevel] = useState("");
+  const [newTarget, setNewTarget] = useState("");
 
-  // --- Education Goals helpers ---
-  const goals = data.educationGoals || [];
-  const goalFor = (level) => goals.find((g) => g.year === goalYear && g.level === level);
+  const yearGoals = (data.educationGoals || [])
+    .filter((g) => g.year === currentYear)
+    .sort((a, b) => a.level - b.level);
 
-  const setGoalTarget = (level, target) => {
+  const setCompleted = (id, n) =>
+    setData((d) => ({
+      ...d,
+      educationGoals: (d.educationGoals || []).map((g) =>
+        g.id === id ? { ...g, completed: Math.max(0, n) } : g
+      ),
+    }));
+
+  const saveGoal = () => {
+    const lvl = parseInt(newLevel);
+    const tgt = parseInt(newTarget);
+    if (!lvl || !tgt || tgt < 1) return;
     setData((d) => {
-      const existing = (d.educationGoals || []).find((g) => g.year === goalYear && g.level === level);
+      const existing = (d.educationGoals || []).find((g) => g.year === currentYear && g.level === lvl);
       if (existing) {
-        return { ...d, educationGoals: d.educationGoals.map((g) =>
-          g.year === goalYear && g.level === level ? { ...g, target } : g) };
+        return {
+          ...d,
+          educationGoals: (d.educationGoals || []).map((g) =>
+            g.id === existing.id ? { ...g, target: tgt } : g
+          ),
+        };
       }
-      return { ...d, educationGoals: [...(d.educationGoals || []), { id: uid(), year: goalYear, level, target }] };
-    });
-  };
-
-  const completedLevel = (level) =>
-    data.members.filter((m) => {
-      const date = (m.levelDates || {})[String(level)];
-      return date && date.startsWith(String(goalYear));
-    });
-
-  const inProgressLevel = (level) =>
-    data.members.filter((m) => m.level === level && memberStatus(m).key !== "dormant");
-
-  // --- DTM helpers ---
-  const tracked = data.members.filter((m) => m.dtm);
-  const untracked = data.members.filter((m) => !m.dtm);
-  const [pick, setPick] = useState("");
-
-  const startTracking = () => {
-    if (!pick) return;
-    setData((d) => ({
-      ...d,
-      members: d.members.map((m) =>
-        m.id === pick ? { ...m, dtm: DTM_REQUIREMENTS.map(() => false) } : m),
-    }));
-    setPick("");
-  };
-
-  const toggleReq = (memberId, idx) =>
-    setData((d) => ({
-      ...d,
-      members: d.members.map((m) =>
-        m.id === memberId ? { ...m, dtm: m.dtm.map((v, i) => (i === idx ? !v : v)) } : m),
-    }));
-
-  const stopTracking = (memberId) => {
-    if (window.confirm("Remove this member from the DTM tracker? Their checklist will be lost.")) {
-      setData((d) => ({
+      return {
         ...d,
-        members: d.members.map((m) => (m.id === memberId ? { ...m, dtm: undefined } : m)),
-      }));
-    }
+        educationGoals: [
+          ...(d.educationGoals || []),
+          { id: uid(), year: currentYear, level: lvl, target: tgt, completed: 0, done: false, doneDate: "" },
+        ],
+      };
+    });
+    setNewLevel("");
+    setNewTarget("");
   };
 
-  const allYears = [...new Set([currentYear, currentYear - 1, ...(goals.map((g) => g.year))])].sort((a, b) => b - a);
-  const totalCompleted = [1, 2, 3, 4, 5].reduce((sum, l) => sum + completedLevel(l).length, 0);
-  const totalGoals = [1, 2, 3, 4, 5].filter((l) => goalFor(l)).length;
-  const goalsHit = [1, 2, 3, 4, 5].filter((l) => {
-    const g = goalFor(l);
-    return g && completedLevel(l).length >= g.target;
-  }).length;
+  const toggleDone = (id, currentDone) => {
+    setData((d) => ({
+      ...d,
+      educationGoals: (d.educationGoals || []).map((g) =>
+        g.id === id
+          ? { ...g, done: !currentDone, doneDate: !currentDone ? new Date().toISOString().slice(0, 10) : "" }
+          : g
+      ),
+    }));
+  };
+
+  const removeGoal = (id) =>
+    setData((d) => ({ ...d, educationGoals: (d.educationGoals || []).filter((g) => g.id !== id) }));
 
   return (
     <div>
-      <SectionTitle sub="Set yearly level-completion targets, track progress, and see who can help you hit each goal.">
+      <SectionTitle sub="Track DCP progress and see who is on each Pathways level.">
         Education Goals
       </SectionTitle>
 
-      {/* Year selector + summary */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
-        <label className="flex items-center gap-2 text-sm font-semibold" style={{ color: C.blueDeep }}>
-          Year:
-          <select className={inputCls} style={{ ...inputStyle, width: "auto" }} value={goalYear}
-            onChange={(e) => setGoalYear(Number(e.target.value))}>
-            {allYears.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </label>
-        {totalGoals > 0 && (
-          <div className="flex gap-3">
-            <Badge fg={C.green} bg={C.greenBg}>{totalCompleted} level completions recorded</Badge>
-            <Badge fg={goalsHit === totalGoals ? C.green : C.amber} bg={goalsHit === totalGoals ? C.greenBg : C.amberBg}>
-              {goalsHit}/{totalGoals} goals achieved
-            </Badge>
+      {/* DCP Progress link */}
+      <div className="mb-5">
+        <a
+          href="https://dashboards.toastmasters.org/ClubReport.aspx?id=05101315"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold"
+          style={{ backgroundColor: C.blueDeep, color: "white" }}>
+          View DCP Progress on Toastmasters.org ↗
+        </a>
+      </div>
+
+      {/* Level goals */}
+      <Card className="p-4 mb-6">
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>
+          LEVEL GOALS — {currentYear}
+        </div>
+
+        {yearGoals.length === 0 && (
+          <p className="text-sm mb-4" style={{ color: MUTED }}>No level goals set for this year yet.</p>
+        )}
+
+        {yearGoals.length > 0 && (
+          <div className="mb-4 space-y-3">
+            {yearGoals.map((g) => {
+              const completed = g.completed || 0;
+              const hit = completed >= g.target;
+              const pct = g.target > 0 ? Math.min(100, Math.round((completed / g.target) * 100)) : 0;
+              return (
+                <div key={g.id} className="rounded-lg p-3 flex flex-wrap items-center gap-3"
+                  style={{
+                    backgroundColor: g.done ? "#F0FAF3" : hit ? "#F5FAF0" : C.paper,
+                    border: `1px solid ${g.done || hit ? C.green : C.grayLine}`,
+                  }}>
+                  <div className="flex-1 min-w-40">
+                    <div className="text-sm font-bold mb-1" style={{ color: C.blueDeep }}>
+                      Level {g.level}
+                    </div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="text-xs" style={{ color: MUTED }}>Completed:</label>
+                      <input
+                        type="number" min="0"
+                        className={inputCls}
+                        style={{ ...inputStyle, width: 60, padding: "2px 6px", fontSize: 13 }}
+                        value={completed}
+                        onChange={(e) => setCompleted(g.id, parseInt(e.target.value) || 0)}
+                      />
+                      <span className="text-xs" style={{ color: MUTED }}>/ {g.target} target</span>
+                      {hit && !g.done && (
+                        <span className="text-xs font-semibold" style={{ color: C.green }}>Target reached!</span>
+                      )}
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: C.grayLine }}>
+                      <div className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: g.done || hit ? C.green : C.blue,
+                        }} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {g.done ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold px-2 py-1 rounded-full"
+                          style={{ backgroundColor: C.green, color: "white" }}>
+                          ✓ Complete{g.doneDate ? ` · ${fmtDate(g.doneDate)}` : ""}
+                        </span>
+                        <button className="text-xs underline" style={{ color: MUTED }}
+                          onClick={() => toggleDone(g.id, true)}>Undo</button>
+                      </div>
+                    ) : (
+                      <Btn kind="primary" onClick={() => toggleDone(g.id, false)}>Mark complete</Btn>
+                    )}
+                    <button className="text-xs px-2 py-1 rounded"
+                      style={{ color: C.red, border: `1px solid ${C.grayLine}` }}
+                      onClick={() => removeGoal(g.id)}>Remove</button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-      </div>
 
-      {/* Per-level goal cards */}
-      <div className="space-y-4 mb-8">
-        {[1, 2, 3, 4, 5].map((level) => {
-          const g = goalFor(level);
-          const completed = completedLevel(level);
-          const inProgress = inProgressLevel(level);
-          const actual = completed.length;
-          const target = g ? g.target : 0;
-          const pct = target > 0 ? Math.min(100, Math.round((actual / target) * 100)) : 0;
-          const hit = target > 0 && actual >= target;
-
-          return (
-            <Card key={level} className="p-4" accent={hit ? C.green : target > 0 ? (actual > 0 ? C.amber : C.grayLine) : C.grayLine}>
-              <div className="flex flex-wrap items-start gap-3 mb-3">
-                <div className="flex-1">
-                  <div className="font-bold text-sm" style={{ color: C.blueDeep, fontFamily: SERIF }}>
-                    Level {level} completions — {goalYear}
-                  </div>
-                  {memberPaths.length === 0 && (
-                    <div className="text-xs mt-0.5" style={{ color: "#5B6B73" }}>
-                      Members who finish all Level {level} Pathways projects
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {hit && <Badge fg={C.green} bg={C.greenBg}>Goal met</Badge>}
-                  <label className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: C.blueDeep }}>
-                    Target:
-                    <input type="number" min="0" max="50"
-                      className={inputCls} style={{ ...inputStyle, width: "4rem" }}
-                      value={target || ""}
-                      placeholder="0"
-                      onChange={(e) => setGoalTarget(level, Math.max(0, Number(e.target.value) || 0))} />
-                    members
-                  </label>
-                </div>
-              </div>
-
-              {target > 0 && (
-                <div className="mb-3">
-                  <div className="flex justify-between text-xs mb-1">
-                    <span style={{ color: "#5B6B73" }}>{actual} of {target} completed</span>
-                    <span style={{ color: hit ? C.green : C.ink }}>{pct}%</span>
-                  </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: C.grayLine }}>
-                    <div className="h-full rounded-full transition-all"
-                      style={{ width: `${pct}%`, backgroundColor: hit ? C.green : C.maroon }} />
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Completed this year */}
-                <div>
-                  <div className="text-xs font-bold mb-1" style={{ color: C.green }}>
-                    Completed Level {level} in {goalYear} ({actual})
-                  </div>
-                  {completed.length === 0 ? (
-                    <p className="text-xs" style={{ color: "#8A958F" }}>None recorded yet — add dates via member edit.</p>
-                  ) : (
-                    <ul className="space-y-0.5">
-                      {completed.map((m) => (
-                        <li key={m.id} className="flex items-center gap-1.5 text-xs">
-                          <span className="font-semibold" style={{ color: C.blueDeep }}>{m.name}</span>
-                          <span style={{ color: "#8A958F" }}>{fmtDate((m.levelDates || {})[String(level)])}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                {/* In progress — can help hit the goal */}
-                <div>
-                  <div className="text-xs font-bold mb-1" style={{ color: C.amber }}>
-                    Working on Level {level} — can help ({inProgress.length})
-                  </div>
-                  {inProgress.length === 0 ? (
-                    <p className="text-xs" style={{ color: "#8A958F" }}>No active members at this level.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1">
-                      {inProgress.map((m) => (
-                        <Badge key={m.id} fg={C.amber} bg={C.amberBg}>{m.name}</Badge>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Individual DTM tracker — secondary */}
-      <button onClick={() => setShowDTM((v) => !v)}
-        className="flex items-center gap-2 text-sm font-semibold mb-3"
-        style={{ color: C.blueDeep }}>
-        <span style={{ color: C.maroon }}>{showDTM ? "▲" : "▼"}</span>
-        Individual DTM tracker {showDTM ? "(hide)" : "(show)"}
-      </button>
-
-      {showDTM && (
-        <div>
-          <Card className="p-4 mb-4" accent={C.maroon}>
-            <h3 className="text-sm font-bold mb-2" style={{ color: C.blueDeep }}>Add a member to the DTM track</h3>
-            <div className="flex flex-wrap gap-2">
-              <select className={`${inputCls} max-w-xs`} style={inputStyle} value={pick}
-                onChange={(e) => setPick(e.target.value)}>
-                <option value="">Choose member…</option>
-                {untracked.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-              <Btn kind="maroon" onClick={startTracking} disabled={!pick}>Start tracking</Btn>
-            </div>
-          </Card>
-
-          {tracked.length === 0 ? (
-            <Card className="p-6 text-center">
-              <p className="text-sm" style={{ color: "#5B6B73" }}>No one on the DTM track yet.</p>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {tracked.map((m) => {
-                const done = m.dtm.filter(Boolean).length;
-                const total = DTM_REQUIREMENTS.length;
-                const pct = (done / total) * 100;
-                return (
-                  <Card key={m.id} className="p-4" accent={done === total ? C.green : C.blue}>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="font-bold" style={{ color: C.blueDeep, fontFamily: SERIF }}>{m.name}</div>
-                      {done === total
-                        ? <Badge fg={C.green} bg={C.greenBg}>DTM complete</Badge>
-                        : (
-                          <div className="flex flex-col items-end gap-1">
-                            <Badge fg={C.blue} bg="#E5EEF4">{done}/{total} done</Badge>
-                            <span className="text-xs" style={{ color: C.amber }}>{total - done} to go</span>
-                          </div>
-                        )}
-                    </div>
-                    <div className="h-2 rounded-full overflow-hidden mb-3" style={{ backgroundColor: C.grayLine }}>
-                      <div className="h-full rounded-full"
-                        style={{ width: `${pct}%`, backgroundColor: done === total ? C.green : C.blue }} />
-                    </div>
-                    <ul className="space-y-1.5">
-                      {DTM_REQUIREMENTS.map((req, i) => (
-                        <li key={req} className="flex items-start gap-2 text-sm">
-                          <input type="checkbox" checked={m.dtm[i]} className="mt-0.5"
-                            onChange={() => toggleReq(m.id, i)} />
-                          <span style={{
-                            color: m.dtm[i] ? "#8A958F" : C.ink,
-                            textDecoration: m.dtm[i] ? "line-through" : "none",
-                          }}>{req}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="mt-3 text-right">
-                      <button className="text-xs" style={{ color: "#8A958F" }} onClick={() => stopTracking(m.id)}>
-                        Stop tracking
-                      </button>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
+        {/* Set / update goal */}
+        <div className="flex flex-wrap items-end gap-3 pt-3" style={{ borderTop: `1px dashed ${C.grayLine}` }}>
+          <Field label="Level">
+            <select className={inputCls} style={inputStyle} value={newLevel}
+              onChange={(e) => {
+                const lvl = parseInt(e.target.value);
+                setNewLevel(e.target.value);
+                const existing = yearGoals.find((g) => g.level === lvl);
+                setNewTarget(existing ? String(existing.target) : "");
+              }}>
+              <option value="">Pick level…</option>
+              <option value="1">Level 1</option>
+              <option value="2">Level 2</option>
+              <option value="3">Level 3</option>
+              <option value="4">Level 4</option>
+              <option value="5">Level 5</option>
+            </select>
+          </Field>
+          <Field label="Target (members)">
+            <input type="number" min="1" className={inputCls} style={{ ...inputStyle, width: 100 }}
+              value={newTarget} onChange={(e) => setNewTarget(e.target.value)}
+              placeholder="e.g. 3" />
+          </Field>
+          <Btn kind="maroon" onClick={saveGoal} disabled={!newLevel || !newTarget}>
+            {yearGoals.some((g) => g.level === parseInt(newLevel)) ? "Update goal" : "Set goal"}
+          </Btn>
         </div>
-      )}
+      </Card>
+
+      {/* Members by level */}
+      <Card className="p-4 mb-6">
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>MEMBERS BY CURRENT LEVEL</div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {[1, 2, 3, 4, 5].map((lvl) => {
+            const atLevel = data.members.filter((m) => m.level === lvl);
+            return (
+              <div key={lvl} className="rounded-lg p-3" style={{ backgroundColor: C.amberBg, border: `1px solid ${C.grayLine}` }}>
+                <div className="text-lg font-bold" style={{ color: C.blueDeep, fontFamily: SERIF }}>{atLevel.length}</div>
+                <div className="text-xs font-semibold mb-2" style={{ color: C.blueDeep }}>Level {lvl}</div>
+                {atLevel.length > 0 ? (
+                  <div className="text-xs space-y-0.5">
+                    {atLevel.map((m) => (
+                      <div key={m.id} className="truncate" style={{ color: C.ink }}>{m.name}</div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs" style={{ color: "#8A958F" }}>—</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
     </div>
   );
 }
 
 // ---------- Meeting Rota ----------
-function RotaMeetingTable({ rows, updateMeeting, updateRole, swapRoles }) {
-  const [swapOpen, setSwapOpen] = useState(null); // { meetingId, roleKey }
-  const th = "px-2 py-2 text-left text-xs font-bold whitespace-nowrap sticky top-0";
-  const td = "px-1 py-1 align-middle";
-  const cell = `${inputCls} text-xs`;
-
-  const openSwap = (meetingId, roleKey, e) => {
-    e.stopPropagation();
-    setSwapOpen((prev) =>
-      prev && prev.meetingId === meetingId && prev.roleKey === roleKey ? null : { meetingId, roleKey }
-    );
-  };
-
-  const doSwap = (targetKey) => {
-    if (!swapOpen) return;
-    swapRoles(swapOpen.meetingId, swapOpen.roleKey, targetKey);
-    setSwapOpen(null);
-  };
-
-  return (
-    <>
-      {swapOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 98 }} onClick={() => setSwapOpen(null)} />
-      )}
-      <table className="border-collapse text-sm" style={{ minWidth: "1100px", width: "100%" }}>
-        <thead style={{ backgroundColor: C.blueDeep }}>
-          <tr>
-            <th className={th} style={{ color: C.gold, minWidth: 130 }}>Date</th>
-            <th className={th} style={{ color: C.gold, minWidth: 150 }}>Theme</th>
-            {ROTA_ROLES.map((r) => (
-              <th key={r.key} className={th} style={{ color: C.gold, minWidth: 120 }}>{r.label}</th>
-            ))}
-            <th className={th} style={{ color: C.gold, width: 36 }}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={2 + ROTA_ROLES.length + 1} className="px-4 py-8 text-center text-sm" style={{ color: MUTED }}>
-                No meetings yet — use Quick Generate or add one manually.
-              </td>
-            </tr>
-          )}
-          {rows.map((mtg, i) => (
-            <tr key={mtg.id}
-              style={{ backgroundColor: i % 2 === 0 ? "white" : C.paper, borderBottom: `1px solid ${C.grayLine}` }}>
-              <td className={td}>
-                <input type="date" className={cell} style={inputStyle} value={mtg.date || ""}
-                  onChange={(e) => updateMeeting(mtg.id, "date", e.target.value)} />
-              </td>
-              <td className={td}>
-                <input className={cell} style={inputStyle} value={mtg.theme || ""}
-                  onChange={(e) => updateMeeting(mtg.id, "theme", e.target.value)}
-                  placeholder="Meeting theme" />
-              </td>
-              {ROTA_ROLES.map((r) => {
-                const isSwapSrc = swapOpen && swapOpen.meetingId === mtg.id && swapOpen.roleKey === r.key;
-                const isSwapTarget = swapOpen && swapOpen.meetingId === mtg.id && swapOpen.roleKey !== r.key;
-                const val = (mtg.roles || {})[r.key] || "";
-                return (
-                  <td key={r.key} className={td} style={{ position: "relative" }}>
-                    <div className="flex items-center gap-0.5">
-                      <input
-                        className={cell} style={{ ...inputStyle, flex: 1,
-                          outline: isSwapSrc ? `2px solid ${C.gold}` : undefined }}
-                        list="rota-member-names"
-                        value={val}
-                        onChange={(e) => updateRole(mtg.id, r.key, e.target.value)}
-                        placeholder="Name…" />
-                      <button
-                        title="Swap this role with another"
-                        onClick={(e) => openSwap(mtg.id, r.key, e)}
-                        className="shrink-0 text-xs px-0.5 rounded"
-                        style={{ color: isSwapSrc ? C.gold : MUTED, fontWeight: isSwapSrc ? "bold" : "normal" }}>
-                        ⇄
-                      </button>
-                    </div>
-                    {isSwapSrc && isSwapTarget === false && (
-                      <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 100,
-                        backgroundColor: "white", border: `1px solid ${C.grayLine}`,
-                        borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.14)",
-                        minWidth: 180, padding: "6px 0" }}>
-                        <div className="px-3 py-1 text-xs font-bold" style={{ color: C.blueDeep }}>
-                          Swap with…
-                        </div>
-                        {ROTA_ROLES.filter((x) => x.key !== r.key).map((x) => {
-                          const xVal = (mtg.roles || {})[x.key] || "";
-                          return (
-                            <button key={x.key}
-                              className="w-full text-left px-3 py-1.5 text-xs"
-                              style={{ color: C.ink }}
-                              onMouseOver={(e) => e.currentTarget.style.backgroundColor = C.paper}
-                              onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-                              onClick={() => doSwap(x.key)}>
-                              <span className="font-semibold">{x.label}</span>
-                              {xVal && <span style={{ color: MUTED }}>{" — "}{xVal}</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </td>
-                );
-              })}
-              <td className={td} style={{ textAlign: "center" }}>
-                <button className="text-xs px-1" style={{ color: C.red }}
-                  onClick={() => {
-                    if (window.confirm("Remove this meeting from the rota?"))
-                      updateMeeting(mtg.id, "_remove", true);
-                  }} title="Remove">✕</button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  );
-}
-
 function RotaView({ data, setData }) {
   const today = new Date().toISOString().slice(0, 10);
   const rota = (data.meetingRota || []).slice().sort((a, b) => a.date.localeCompare(b.date));
   const upcoming = rota.filter((r) => r.date >= today);
-  const past = rota.filter((r) => r.date < today);
+  const next = upcoming[0] || null;
   const memberNames = data.members.map((m) => m.name).sort();
 
-  const [showPast, setShowPast] = useState(false);
-  const [genDate, setGenDate] = useState(today);
-  const [genCount, setGenCount] = useState("4");
-  const [genFreq, setGenFreq] = useState("14");
+  const [bulkStart, setBulkStart] = useState("");
+  const [bulkText, setBulkText] = useState("");
+  const [bulkPreview, setBulkPreview] = useState(null);
 
-  const updateMeeting = (id, key, value) => {
-    if (key === "_remove") {
-      setData((d) => ({ ...d, meetingRota: (d.meetingRota || []).filter((r) => r.id !== id) }));
-      return;
-    }
-    setData((d) => ({
-      ...d,
-      meetingRota: (d.meetingRota || []).map((r) => r.id === id ? { ...r, [key]: value } : r),
-    }));
-  };
-
-  const updateRole = (id, roleKey, value) =>
+  const setToastmaster = (id, value) =>
     setData((d) => ({
       ...d,
       meetingRota: (d.meetingRota || []).map((r) =>
-        r.id === id ? { ...r, roles: { ...(r.roles || {}), [roleKey]: value } } : r
+        r.id === id ? { ...r, roles: { ...(r.roles || {}), toastmaster: value } } : r
       ),
     }));
 
-  const swapRoles = (meetingId, roleKeyA, roleKeyB) =>
+  const setMeetingDate = (id, date) =>
     setData((d) => ({
       ...d,
-      meetingRota: (d.meetingRota || []).map((r) => {
-        if (r.id !== meetingId) return r;
-        const roles = { ...(r.roles || {}) };
-        const tmp = roles[roleKeyA] || "";
-        roles[roleKeyA] = roles[roleKeyB] || "";
-        roles[roleKeyB] = tmp;
-        return { ...r, roles };
-      }),
+      meetingRota: (d.meetingRota || []).map((r) => r.id === id ? { ...r, date } : r),
     }));
 
-  const addBlank = () =>
-    setData((d) => ({
-      ...d,
-      meetingRota: [...(d.meetingRota || []), { id: uid(), date: "", theme: "", roles: {} }],
-    }));
+  const removeMeeting = (id) =>
+    setData((d) => ({ ...d, meetingRota: (d.meetingRota || []).filter((r) => r.id !== id) }));
 
-  const generate = () => {
-    const n = Math.min(parseInt(genCount, 10) || 0, 52);
-    const freq = parseInt(genFreq, 10) || 14;
-    if (!genDate || n < 1) return;
-    const start = new Date(genDate + "T00:00:00");
-    const rows = Array.from({ length: n }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(d.getDate() + i * freq);
-      return { id: uid(), date: d.toISOString().slice(0, 10), theme: "", roles: {} };
-    });
-    setData((d) => ({ ...d, meetingRota: [...(d.meetingRota || []), ...rows] }));
+  const genMeetingDates = (startDate, count) => {
+    const dates = [];
+    const d = new Date(startDate + "T00:00:00");
+    for (let i = 0; i < count; i++) {
+      dates.push(d.toISOString().slice(0, 10));
+      const day = d.getDay();
+      // Mon(1)→next Tue: +8 days; Tue(2)→next Mon: +6 days; fallback +7
+      d.setDate(d.getDate() + (day === 1 ? 8 : day === 2 ? 6 : 7));
+    }
+    return dates;
   };
 
-  const tableProps = { updateMeeting, updateRole, swapRoles };
+  const buildBulkPreview = (startDate, text) => {
+    if (!startDate || !text.trim()) return null;
+    const names = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (names.length === 0) return null;
+    return genMeetingDates(startDate, names.length).map((date, i) => ({ date, name: names[i] }));
+  };
+
+  const applyBulk = () => {
+    if (!bulkPreview || bulkPreview.length === 0) return;
+    setData((d) => {
+      let rota = [...(d.meetingRota || [])];
+      bulkPreview.forEach(({ date, name }) => {
+        if (rota.some((r) => r.date === date)) {
+          rota = rota.map((r) => r.date === date ? { ...r, roles: { ...(r.roles || {}), toastmaster: name } } : r);
+        } else {
+          rota = [...rota, { id: uid(), date, theme: "", roles: { toastmaster: name } }];
+        }
+      });
+      return { ...d, meetingRota: rota };
+    });
+    setBulkText("");
+    setBulkStart("");
+    setBulkPreview(null);
+  };
 
   return (
     <div>
@@ -2785,53 +2580,219 @@ function RotaView({ data, setData }) {
         {memberNames.map((n) => <option key={n} value={n} />)}
       </datalist>
 
-      <SectionTitle>Meeting Rota</SectionTitle>
+      <SectionTitle sub="Who is running the next meeting?">Meeting Rota</SectionTitle>
 
-      <Card className="p-4 mb-6" accent={C.gold}>
-        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>QUICK GENERATE</div>
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Start date">
-            <input type="date" className={inputCls} style={inputStyle} value={genDate}
-              onChange={(e) => setGenDate(e.target.value)} />
-          </Field>
-          <Field label="Meetings">
-            <input type="number" min="1" max="52" className={inputCls}
-              style={{ ...inputStyle, width: 80 }}
-              value={genCount} onChange={(e) => setGenCount(e.target.value)} />
-          </Field>
-          <Field label="Frequency">
-            <select className={inputCls} style={inputStyle} value={genFreq}
-              onChange={(e) => setGenFreq(e.target.value)}>
-              <option value="7">Weekly</option>
-              <option value="14">Fortnightly</option>
-              <option value="28">Monthly (4 wks)</option>
-            </select>
-          </Field>
-          <Btn kind="maroon" onClick={generate}>Generate</Btn>
-          <Btn kind="ghost" onClick={addBlank}>+ Add one</Btn>
+      {/* Next meeting highlight */}
+      {next && (
+        <Card className="p-5 mb-6" accent={C.gold} style={{ backgroundColor: "#FBF5DA" }}>
+          <div className="text-xs font-bold tracking-wide mb-1" style={{ color: C.blueDeep }}>NEXT MEETING</div>
+          <div className="text-2xl font-bold mb-2" style={{ color: C.maroon, fontFamily: SERIF }}>
+            {fmtDate(next.date)}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold" style={{ color: C.blueDeep }}>Toastmaster of the Day:</span>
+            <span className="text-sm font-bold" style={{ color: (next.roles || {}).toastmaster ? C.ink : MUTED }}>
+              {(next.roles || {}).toastmaster || "TBC"}
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {/* Bulk schedule Toastmasters — primary workflow */}
+      <Card className="p-4 mb-6" accent={C.blue}>
+        <div className="text-xs font-bold tracking-wide mb-1" style={{ color: C.blueDeep }}>
+          BULK SCHEDULE TOASTMASTERS
         </div>
-        <p className="text-xs mt-2" style={{ color: MUTED }}>
-          Click the ⇄ icon next to any name to swap that role with another in the same meeting.
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          Pick the first meeting date, paste one name per line. Meetings are automatically created on the Mon / Tue alternating schedule.
         </p>
+        <div className="mb-3">
+          <Field label="First meeting date">
+            <input type="date" className={inputCls} style={{ ...inputStyle, maxWidth: 180 }}
+              value={bulkStart}
+              onChange={(e) => {
+                setBulkStart(e.target.value);
+                setBulkPreview(buildBulkPreview(e.target.value, bulkText));
+              }} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap gap-4 items-start">
+          <div className="flex-1 min-w-48">
+            <textarea
+              className={inputCls}
+              style={{ ...inputStyle, width: "100%", minHeight: 120, fontFamily: "monospace", resize: "vertical" }}
+              value={bulkText}
+              onChange={(e) => {
+                setBulkText(e.target.value);
+                setBulkPreview(buildBulkPreview(bulkStart, e.target.value));
+              }}
+              placeholder={"Alice\nBob\nCarol\n…"} />
+            <div className="mt-2 flex gap-2">
+              <Btn kind="primary" onClick={applyBulk} disabled={!bulkPreview || bulkPreview.length === 0}>
+                Apply assignments
+              </Btn>
+              {bulkPreview && (
+                <Btn kind="ghost" onClick={() => { setBulkText(""); setBulkStart(""); setBulkPreview(null); }}>Clear</Btn>
+              )}
+            </div>
+          </div>
+          {bulkPreview && bulkPreview.length > 0 && (
+            <div className="flex-1 min-w-48">
+              <div className="text-xs font-bold mb-2" style={{ color: C.blueDeep }}>Preview</div>
+              <div className="space-y-1">
+                {bulkPreview.map((p) => (
+                  <div key={p.date} className="flex items-center gap-2 text-xs py-1"
+                    style={{ borderBottom: `1px solid ${C.grayLine}` }}>
+                    <span className="w-28 shrink-0 font-semibold" style={{ color: C.ink }}>{fmtDate(p.date)}</span>
+                    <span style={{ color: C.blueDeep }}>{p.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </Card>
 
-      <div className="text-sm font-semibold mb-2" style={{ color: C.blueDeep }}>
-        Upcoming ({upcoming.length})
+      {/* Upcoming meetings — editable */}
+      {upcoming.length > 0 && (
+        <Card className="p-0 mb-6 overflow-hidden">
+          <div className="px-4 py-3" style={{ backgroundColor: C.blueDeep }}>
+            <span className="text-xs font-bold tracking-wide" style={{ color: "white" }}>
+              UPCOMING MEETINGS — {upcoming.length} scheduled
+            </span>
+          </div>
+          <div>
+            {upcoming.map((mtg, i) => (
+              <div key={mtg.id}
+                className="flex flex-wrap items-center gap-3 px-4 py-3"
+                style={{
+                  borderBottom: i < upcoming.length - 1 ? `1px solid ${C.grayLine}` : "none",
+                  backgroundColor: i % 2 === 0 ? "white" : "#FAFAF8",
+                }}>
+                <span className="text-xs font-bold w-5 shrink-0 text-center"
+                  style={{ color: MUTED }}>
+                  {i + 1}
+                </span>
+                <input
+                  type="date"
+                  className={inputCls}
+                  style={{ ...inputStyle, width: 150 }}
+                  value={mtg.date}
+                  onChange={(e) => setMeetingDate(mtg.id, e.target.value)} />
+                <span className="text-xs font-semibold shrink-0 w-8" style={{ color: MUTED }}>
+                  {mtg.date ? new Date(mtg.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" }) : ""}
+                </span>
+                <input
+                  className={inputCls}
+                  list="rota-member-names"
+                  style={{ ...inputStyle, flex: 1, minWidth: 140 }}
+                  value={(mtg.roles || {}).toastmaster || ""}
+                  onChange={(e) => setToastmaster(mtg.id, e.target.value)}
+                  placeholder="Toastmaster of the Day…" />
+                <button className="text-xs shrink-0 px-2 py-1 rounded"
+                  style={{ color: C.red, border: `1px solid ${C.grayLine}` }}
+                  onClick={() => removeMeeting(mtg.id)}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+// ---------- Events admin view ----------
+function EventsView({ data, setData }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const events = (data.events || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = events.filter((e) => e.date >= today);
+  const past = events.filter((e) => e.date < today);
+  const [showPastEvt, setShowPastEvt] = useState(false);
+  const [form, setForm] = useState({ title: "", detail: "", date: today });
+
+  const addEvent = () => {
+    const { title, detail, date } = form;
+    if (!title.trim() || !date) return;
+    setData((d) => ({
+      ...d,
+      events: [...(d.events || []), { id: uid(), title: title.trim(), detail: detail.trim(), date, dismissed: [] }],
+    }));
+    setForm({ title: "", detail: "", date: today });
+  };
+
+  const removeEvent = (id) => {
+    if (window.confirm("Remove this event notification?"))
+      setData((d) => ({ ...d, events: (d.events || []).filter((e) => e.id !== id) }));
+  };
+
+  const EventCard = ({ ev, faded }) => (
+    <Card className="p-4" accent={faded ? C.grayLine : C.gold}
+      style={{ opacity: faded ? 0.6 : 1 }}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="font-bold text-sm" style={{ color: C.blueDeep }}>{ev.title}</div>
+          <div className="text-xs mt-0.5" style={{ color: MUTED }}>{fmtDate(ev.date)}</div>
+          {ev.detail && <p className="text-sm mt-1" style={{ color: C.ink }}>{ev.detail}</p>}
+        </div>
+        <button className="text-xs shrink-0 px-2 py-0.5 rounded"
+          style={{ color: C.red, border: `1px solid ${C.grayLine}` }}
+          onClick={() => removeEvent(ev.id)}>Remove</button>
       </div>
-      <div className="overflow-x-auto rounded-lg mb-6" style={{ border: `1px solid ${C.grayLine}` }}>
-        <RotaMeetingTable rows={upcoming} {...tableProps} />
-      </div>
+    </Card>
+  );
+
+  return (
+    <div>
+      <SectionTitle sub="Announcements and events shown as pop-up notifications to members in the member portal.">
+        Events
+      </SectionTitle>
+
+      <Card className="p-4 mb-6" accent={C.gold}>
+        <div className="text-xs font-bold tracking-wide mb-3" style={{ color: C.blueDeep }}>ADD EVENT</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Field label="Title">
+            <input className={inputCls} style={inputStyle} value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              placeholder="Event title…" />
+          </Field>
+          <Field label="Date">
+            <input type="date" className={inputCls} style={inputStyle} value={form.date}
+              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
+          </Field>
+          <Field label="Details (optional)">
+            <div className="flex gap-2">
+              <input className={`${inputCls} flex-1`} style={inputStyle} value={form.detail}
+                onChange={(e) => setForm((f) => ({ ...f, detail: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") addEvent(); }}
+                placeholder="Extra info…" />
+              <Btn kind="maroon" onClick={addEvent} disabled={!form.title.trim() || !form.date}>Add</Btn>
+            </div>
+          </Field>
+        </div>
+      </Card>
+
+      {upcoming.length === 0 && past.length === 0 && (
+        <Card className="p-8 text-center">
+          <p className="text-sm" style={{ color: MUTED }}>No events yet — add one above.</p>
+        </Card>
+      )}
+
+      {upcoming.length > 0 && (
+        <div className="space-y-3 mb-6">
+          <div className="text-sm font-semibold" style={{ color: C.blueDeep }}>Upcoming ({upcoming.length})</div>
+          {upcoming.map((ev) => <EventCard key={ev.id} ev={ev} />)}
+        </div>
+      )}
 
       {past.length > 0 && (
         <div>
           <button className="flex items-center gap-2 text-sm font-semibold mb-3"
-            style={{ color: MUTED }} onClick={() => setShowPast((v) => !v)}>
-            <span>{showPast ? "▲" : "▼"}</span>
-            Past meetings ({past.length})
+            style={{ color: MUTED }} onClick={() => setShowPastEvt((v) => !v)}>
+            <span>{showPastEvt ? "▲" : "▼"}</span>
+            Past events ({past.length})
           </button>
-          {showPast && (
-            <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.grayLine}`, opacity: 0.75 }}>
-              <RotaMeetingTable rows={past} {...tableProps} />
+          {showPastEvt && (
+            <div className="space-y-3">
+              {past.map((ev) => <EventCard key={ev.id} ev={ev} faded />)}
             </div>
           )}
         </div>
@@ -2845,11 +2806,11 @@ const NAV = [
   { key: "home", label: "Home", icon: "⌂" },
   { key: "members", label: "Members", icon: "👥" },
   { key: "onboarding", label: "100-Day", icon: "🗓" },
-  { key: "cycles", label: "Cycles", icon: "🔄" },
-  { key: "weekly", label: "Weekly", icon: "☑" },
+  { key: "cycles", label: "Skill Cycles", short: "Cycles", icon: "🔄" },
   { key: "recognition", label: "Recognition", short: "Awards", icon: "🏆" },
   { key: "dtm", label: "Education Goals", short: "Goals", icon: "🎖" },
   { key: "rota", label: "Meeting Rota", short: "Rota", icon: "📋" },
+  { key: "events", label: "Events", icon: "📣" },
 ];
 
 const LS_KEY = "vpe-dashboard-data";
@@ -2870,6 +2831,7 @@ const loadFromStorage = () => {
       educationGoals: Array.isArray(parsed.educationGoals) ? parsed.educationGoals : [],
       buddyGroups: Array.isArray(parsed.buddyGroups) ? parsed.buddyGroups : [],
       meetingRota: Array.isArray(parsed.meetingRota) ? parsed.meetingRota : [],
+      events: Array.isArray(parsed.events) ? parsed.events : [],
     };
   } catch {
     return null;
@@ -2878,7 +2840,16 @@ const loadFromStorage = () => {
 
 const WRITE_TOKEN = process.env.REACT_APP_WRITE_TOKEN || "";
 
+// Only attempt cloud sync when deployed to Vercel (not local dev)
+const IS_CLOUD = (() => {
+  try {
+    const h = window.location.hostname;
+    return h !== "localhost" && h !== "127.0.0.1" && !h.startsWith("192.168.");
+  } catch { return false; }
+})();
+
 async function cloudLoad() {
+  if (!IS_CLOUD) return null;
   try {
     const res = await fetch("/api/data");
     if (!res.ok) return null;
@@ -2889,6 +2860,7 @@ async function cloudLoad() {
 }
 
 async function cloudSave(data) {
+  if (!IS_CLOUD) return true; // silently succeed in local dev
   try {
     const res = await fetch("/api/data", {
       method: "POST",
@@ -2987,16 +2959,12 @@ export default function VPEDashboard() {
       Name: m.name,
       Path: memberPaths(m).join(", "),
       Level: m.level,
-      "Current project": m.currentProject,
       "Last attended": m.lastAttended || "",
       "Days since attended": daysSince(m.lastAttended) ?? "",
       Status: memberStatus(m).key,
-      "Total meetings": m.totalMeetings,
-      "Roles completed": m.roles.join(", "),
       "New member": m.isNew ? "Yes" : "No",
       "Onboarding start": m.onboardingStart || "",
       "Onboarding day": m.onboardingStart ? (onboardingDay(m.onboardingStart) ?? "") : "",
-      "DTM progress": m.dtm ? `${m.dtm.filter(Boolean).length}/${DTM_REQUIREMENTS.length}` : "",
       Notes: m.notes,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -3138,10 +3106,10 @@ export default function VPEDashboard() {
         {view === "members" && <MembersView key={memberFilter} data={data} setData={setData} initialFilter={memberFilter} />}
         {view === "onboarding" && <OnboardingView data={data} setData={setData} />}
         {view === "cycles" && <CyclesView data={data} setData={setData} />}
-        {view === "weekly" && <WeeklyView data={data} setData={setData} />}
         {view === "recognition" && <RecognitionView data={data} setData={setData} />}
         {view === "dtm" && <DTMView data={data} setData={setData} />}
         {view === "rota" && <RotaView data={data} setData={setData} />}
+        {view === "events" && <EventsView data={data} setData={setData} />}
       </main>
 
       {/* Mobile bottom nav */}
