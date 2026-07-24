@@ -2885,14 +2885,16 @@ const IS_CLOUD = (() => {
   } catch { return false; }
 })();
 
+// Distinguishes "blob genuinely empty" from "storage errored out" — the two
+// look identical to the caller otherwise, which hides real config problems.
 async function cloudLoad() {
-  if (!IS_CLOUD) return null;
+  if (!IS_CLOUD) return { ok: true, data: null };
   try {
     const res = await fetch("/api/data");
-    if (!res.ok) return null;
-    return await res.json();
+    if (!res.ok) return { ok: false, data: null };
+    return { ok: true, data: await res.json() };
   } catch {
-    return null;
+    return { ok: false, data: null };
   }
 }
 
@@ -2921,18 +2923,20 @@ export default function VPEDashboard() {
   const [toast, setToast] = useState("");
   const [syncStatus, setSyncStatus] = useState("idle"); // "loading"|"ok"|"error"|"idle"
   const [cloudChecked, setCloudChecked] = useState(!IS_CLOUD);
+  const [cloudLoadError, setCloudLoadError] = useState(false);
   const fileRef = useRef(null);
   const syncTimer = useRef(null);
 
   // Load from cloud on first mount — blob storage is the source of truth when deployed.
   useEffect(() => {
     setSyncStatus("loading");
-    cloudLoad().then((cloudData) => {
+    cloudLoad().then(({ ok, data: cloudData }) => {
       if (cloudData) {
         setData(cloudData);
         try { localStorage.setItem(LS_KEY, JSON.stringify(cloudData)); } catch {}
       }
-      setSyncStatus(cloudData ? "ok" : "idle");
+      setSyncStatus(!ok ? "error" : cloudData ? "ok" : "idle");
+      setCloudLoadError(!ok);
       setCloudChecked(true);
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3038,6 +3042,22 @@ export default function VPEDashboard() {
         <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.blue }}>
           <div className="text-sm font-semibold" style={{ color: "rgba(255,255,255,0.75)" }}>
             Checking cloud storage…
+          </div>
+        </div>
+      );
+    }
+    if (cloudLoadError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center p-6" style={{ backgroundColor: C.blue }}>
+          <div className="max-w-sm w-full bg-white rounded-xl shadow-lg p-8 text-center"
+            style={{ borderTop: `6px solid ${C.red}` }}>
+            <h1 className="text-xl mb-2" style={{ fontFamily: SERIF, color: C.blue }}>Can't reach cloud storage</h1>
+            <p className="text-sm mb-4" style={{ color: "#5B6B73" }}>
+              The dashboard couldn't read from Vercel Blob storage — this is a configuration
+              problem (missing Blob store, or a mismatched write token), not missing data.
+              Loading a file here would not be safe; check the deployment config and reload.
+            </p>
+            <Btn onClick={() => window.location.reload()}>Try again</Btn>
           </div>
         </div>
       );
